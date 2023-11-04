@@ -5,6 +5,8 @@ const kMaxNumLights = 1024;
 const lightExtentMin = vec3.fromValues(-50, -30, -50);
 const lightExtentMax = vec3.fromValues(50, 50, 50);
 
+const shadowDepthTextureSize = 1024;
+
 class PointLight {
     constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer) {
         const extent = vec3.sub(lightExtentMax, lightExtentMin);
@@ -86,6 +88,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     let vertexTextureQuad
     let fragmentGBuffersDebugView
     let fragmentDeferredRendering
+    let vertexShadow
 
     await Promise.all([
         fetch('./lightUpdate.wgsl').then((r) => r.text()).then((r) => lightUpdate = r),
@@ -94,6 +97,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         fetch('./vertexTextureQuad.wgsl').then((r) => r.text()).then((r) => vertexTextureQuad = r),
         fetch('./fragmentGBuffersDebugView.wgsl').then((r) => r.text()).then((r) => fragmentGBuffersDebugView = r),
         fetch('./fragmentDeferredRendering.wgsl').then((r) => r.text()).then((r) => fragmentDeferredRendering = r),
+        fetch('./vertexShadow.wgsl').then((r) => r.text()).then((r) => vertexShadow = r),
     ])
 
     const devicePixelRatio = window.devicePixelRatio || 1;
@@ -448,6 +452,95 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         ],
     });
 
+    // VVV シャドウマップ関連 VVV
+
+    // Create the depth texture for rendering/sampling the shadow map.
+    const shadowDepthTexture = device.createTexture({
+        size: [shadowDepthTextureSize, shadowDepthTextureSize, 1],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        format: 'depth32float',
+    });
+    const shadowDepthTextureView = shadowDepthTexture.createView();
+
+    const uniformBufferBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX,
+                buffer: {
+                    type: 'uniform',
+                },
+            },
+        ],
+    });
+
+    const shadowPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [
+                uniformBufferBindGroupLayout,
+                uniformBufferBindGroupLayout,
+            ],
+        }),
+        vertex: {
+            module: device.createShaderModule({
+                code: vertexShadow,
+            }),
+            entryPoint: 'main',
+            buffers: vertexBuffers,
+        },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth32float',
+        },
+        primitive,
+    });
+
+    const sceneUniformBuffer = device.createBuffer({
+        // Two 4x4 viewProj matrices,
+        // one for the camera and one for the light.
+        // Then a vec3 for the light position.
+        // Rounded to the nearest multiple of 16.
+        size: 2 * 4 * 16 + 4 * 4,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const sceneBindGroupForShadow = device.createBindGroup({
+        layout: uniformBufferBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: sceneUniformBuffer,
+                },
+            },
+        ],
+    });
+
+    const modelBindGroup = device.createBindGroup({
+        layout: uniformBufferBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: modelUniformBuffer,
+                },
+            },
+        ],
+    });
+
+    const shadowPassDescriptor /*: GPURenderPassDescriptor*/ = {
+        colorAttachments: [],
+        depthStencilAttachment: {
+            view: shadowDepthTextureView,
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+        },
+    };
+
+    // ^^^ シャドウマップ関連 ^^^
+
     const gBufferTexturesBindGroup = device.createBindGroup({
         layout: gBufferTexturesBindGroupLayout,
         entries: [
@@ -636,6 +729,72 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         return viewProjMatrix /*as Float32Array*/;
     }
 
+    function updateShadowSceneUniform() {
+        const t = Date.now() / 1000;
+        const tx = Math.PI * (t / 3);
+        const ty = Math.PI * (t / 4);
+        const tz = Math.PI * (t / 5);
+
+        const lx = Math.sin(tx) * 100;
+        const ly = 100 + Math.cos(ty) * 30;
+        const lz = Math.cos(tz) * 100;
+        const lightPosition = vec3.fromValues(lx, ly, lz);
+        const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
+        const lightProjectionMatrix = mat4.create();
+        {
+            const left = -80;
+            const right = 80;
+            const bottom = -80;
+            const top = 80;
+            const near = -200;
+            const far = 300;
+            mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
+        }
+
+        const lightViewProjMatrix = mat4.multiply(
+            lightProjectionMatrix,
+            lightViewMatrix
+        );
+
+
+        // The camera/light aren't moving, so write them into buffers now.
+        const lightMatrixData = lightViewProjMatrix /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            0,
+            lightMatrixData.buffer,
+            lightMatrixData.byteOffset,
+            lightMatrixData.byteLength
+        );
+
+        const cameraMatrixData = viewProjMatrix /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            64,
+            cameraMatrixData.buffer,
+            cameraMatrixData.byteOffset,
+            cameraMatrixData.byteLength
+        );
+
+        const lightData = lightPosition /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            128,
+            lightData.buffer,
+            lightData.byteOffset,
+            lightData.byteLength
+        );
+
+        const modelData = modelMatrix /*as Float32Array*/;
+        device.queue.writeBuffer(
+            modelUniformBuffer,
+            0,
+            modelData.buffer,
+            modelData.byteOffset,
+            modelData.byteLength
+        );
+    }
+
     function frame() {
         // Sample is no longer the active page.
         // if (!pageState.active) return;
@@ -657,12 +816,24 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             cameraInvViewProj.byteLength
         );
 
+        updateShadowSceneUniform();
+
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
             pointLight.update(device)
         }
 
         const commandEncoder = device.createCommandEncoder();
+        {  //シャドウマップの描画
+            const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptor);
+            shadowPass.setPipeline(shadowPipeline);
+            shadowPass.setBindGroup(0, sceneBindGroupForShadow);
+            shadowPass.setBindGroup(1, modelBindGroup);
+            shadowPass.setVertexBuffer(0, vertexBuffer);
+            shadowPass.setIndexBuffer(indexBuffer, 'uint16');
+            shadowPass.drawIndexed(indexCount);
+            shadowPass.end();
+        }
         {
             // Write position, normal, albedo etc. data to gBuffers
             const gBufferPass = commandEncoder.beginRenderPass(
