@@ -5,6 +5,74 @@ const kMaxNumLights = 1024;
 const lightExtentMin = vec3.fromValues(-50, -30, -50);
 const lightExtentMax = vec3.fromValues(50, 50, 50);
 
+class PointLight {
+    constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer) {
+        const extent = vec3.sub(lightExtentMax, lightExtentMin);
+        const lightData = new Float32Array(8);
+        const tmpVec4 = vec4.create();
+        // position
+        for (let i = 0; i < 3; i++) {
+            lightData[i] = Math.random() * extent[i] + lightExtentMin[i];
+        }
+        lightData[3] = 1;
+        // color
+        lightData[4 + 0] = Math.random() * 2;
+        lightData[4 + 1] = Math.random() * 2;
+        lightData[4 + 2] = Math.random() * 2;
+        // radius
+        // lightData[4 + 3] = 20.0;
+        lightData[4 + 3] = 50.0;
+
+        this.lightData = lightData
+
+
+        const lightDataStride = 8;
+        const bufferSizeInByte = Float32Array.BYTES_PER_ELEMENT * lightDataStride * 1;
+        this.lightsBuffer = device.createBuffer({
+            size: bufferSizeInByte,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            // mappedAtCreation: true,
+        });
+        device.queue.writeBuffer(this.lightsBuffer, /*bufferOffset=*/0, this.lightData);
+
+
+        const bindGroup = device.createBindGroup({
+            layout: lightsBufferBindGroupLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: this.lightsBuffer,
+                    },
+                },
+                {
+                    binding: 1,
+                    resource: {
+                        buffer: configUniformBuffer,
+                    },
+                },
+                {
+                    binding: 2,
+                    resource: {
+                        buffer: cameraUniformBuffer,
+                    },
+                },
+            ],
+        });
+        this.bindGroup = bindGroup
+    }
+
+    update(device) {
+        let y = this.lightData[1]
+        y -= 0.3
+        if (y < lightExtentMin[1])
+            y = lightExtentMax[1]
+        this.lightData[1] = y
+
+        device.queue.writeBuffer(this.lightsBuffer, /*bufferOffset=*/0, this.lightData);
+    }
+}
+
 const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
@@ -257,6 +325,18 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             targets: [
                 {
                     format: presentationFormat,
+                    blend: {
+                        color: {
+                            srcFactor: 'one',
+                            dstFactor: 'src-alpha',
+                            operation: 'add',
+                        },
+                        alpha: {
+                            srcFactor: 'src-alpha',
+                            dstFactor: 'zero',
+                            operation: 'add',
+                        },
+                    },
                 },
             ],
         },
@@ -301,10 +381,21 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             },
         ],
     };
+    const textureQuadPassDescriptorWithoutClear /*: GPURenderPassDescriptor*/ = {
+        colorAttachments: [
+            {
+                // view is acquired and set in render loop.
+                view: undefined,
+                loadOp: 'load',
+                storeOp: 'store',
+            },
+        ],
+    };
 
     const settings = {
         mode: 'rendering',
-        numLights: 128,
+        // numLights: 4,
+        numLights: 8,
     };
     const configUniformBuffer = (() => {
         const buffer = device.createBuffer({
@@ -481,6 +572,15 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             },
         ],
     });
+
+
+    const pointLights = []
+    for (let i = 0; i < kMaxNumLights; ++i) {
+        pointLights.push(new PointLight(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer))
+    }
+
+
+
     //--------------------
 
     // Scene matrices
@@ -557,6 +657,11 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             cameraInvViewProj.byteLength
         );
 
+        for (let i = 0; i < settings.numLights; ++i) {
+            const pointLight = pointLights[i]
+            pointLight.update(device)
+        }
+
         const commandEncoder = device.createCommandEncoder();
         {
             // Write position, normal, albedo etc. data to gBuffers
@@ -570,14 +675,14 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             gBufferPass.drawIndexed(indexCount);
             gBufferPass.end();
         }
-        {
-            // Update lights position
-            const lightPass = commandEncoder.beginComputePass();
-            lightPass.setPipeline(lightUpdateComputePipeline);
-            lightPass.setBindGroup(0, lightsBufferComputeBindGroup);
-            lightPass.dispatchWorkgroups(Math.ceil(kMaxNumLights / 64));
-            lightPass.end();
-        }
+        // {
+        //     // Update lights position
+        //     const lightPass = commandEncoder.beginComputePass();
+        //     lightPass.setPipeline(lightUpdateComputePipeline);
+        //     lightPass.setBindGroup(0, lightsBufferComputeBindGroup);
+        //     lightPass.dispatchWorkgroups(Math.ceil(kMaxNumLights / 64));
+        //     lightPass.end();
+        // }
         {
             if (settings.mode === 'gBuffers view') {
                 // GBuffers debug view
@@ -596,17 +701,20 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                 debugViewPass.end();
             } else {
                 // Deferred rendering
-                textureQuadPassDescriptor.colorAttachments[0].view = context
-                    .getCurrentTexture()
-                    .createView();
-                const deferredRenderingPass = commandEncoder.beginRenderPass(
-                    textureQuadPassDescriptor
-                );
-                deferredRenderingPass.setPipeline(deferredRenderPipeline);
-                deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);
-                deferredRenderingPass.setBindGroup(1, lightsBufferBindGroup);
-                deferredRenderingPass.draw(6);
-                deferredRenderingPass.end();
+                const view = context.getCurrentTexture().createView();
+                textureQuadPassDescriptor.colorAttachments[0].view = view
+                textureQuadPassDescriptorWithoutClear.colorAttachments[0].view = view
+                let desc = textureQuadPassDescriptor;
+                for (let i = 0; i < settings.numLights; ++i) {
+                    const pointLight = pointLights[i]
+                    const deferredRenderingPass = commandEncoder.beginRenderPass(desc)
+                    deferredRenderingPass.setPipeline(deferredRenderPipeline);
+                    deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);
+                    deferredRenderingPass.setBindGroup(1, pointLight.bindGroup);
+                    deferredRenderingPass.draw(6);
+                    deferredRenderingPass.end();
+                    desc = textureQuadPassDescriptorWithoutClear
+                }
             }
         }
         device.queue.submit([commandEncoder.finish()]);

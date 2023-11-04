@@ -64,20 +64,20 @@ fn main(
         0
     ).rgb;
 
-    for (var i = 0u; i < config.numLights; i++) {
+    // for (var i = 0u; i < config.numLights; i++) {
+    const i = 0u;
         let L = lightsBuffer.lights[i].position.xyz - position;
         let distance = length(L);
-        if (distance > lightsBuffer.lights[i].radius) {
-            continue;
+        if (distance <= lightsBuffer.lights[i].radius) {
+            let lambert = max(dot(normal, normalize(L)), 0.0);
+            result += vec3<f32>(
+                lambert * pow(1.0 - distance / lightsBuffer.lights[i].radius, 2.0) * lightsBuffer.lights[i].color * albedo
+            );
         }
-        let lambert = max(dot(normal, normalize(L)), 0.0);
-        result += vec3<f32>(
-            lambert * pow(1.0 - distance / lightsBuffer.lights[i].radius, 2.0) * lightsBuffer.lights[i].color * albedo
-        );
-    }
+    // }
 
     // some manual ambient
-    result += vec3(0.2);
+    // result += vec3(0.2);
 
     return vec4(result, 1.0);
 }
