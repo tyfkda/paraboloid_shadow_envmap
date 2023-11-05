@@ -7,8 +7,11 @@ const lightExtentMax = vec3.fromValues(50, 50, 50);
 
 const shadowDepthTextureSize = 1024;
 
+const upVector = vec3.fromValues(0, 1, 0);
+const origin = vec3.fromValues(0, 0, 0);
+
 class PointLight {
-    constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer) {
+    constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout) {
         const extent = vec3.sub(lightExtentMax, lightExtentMin);
         const lightData = new Float32Array(8);
         const tmpVec4 = vec4.create();
@@ -37,6 +40,15 @@ class PointLight {
         });
         device.queue.writeBuffer(this.lightsBuffer, /*bufferOffset=*/0, this.lightData);
 
+        // シャドウマップ関連
+        const sceneUniformBuffer = device.createBuffer({
+            // Two 4x4 viewProj matrices,
+            // one for the camera and one for the light.
+            // Then a vec3 for the light position.
+            // Rounded to the nearest multiple of 16.
+            size: 2 * 4 * 16 + 4 * 4,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
 
         const bindGroup = device.createBindGroup({
             layout: lightsBufferBindGroupLayout,
@@ -59,12 +71,33 @@ class PointLight {
                         buffer: cameraUniformBuffer,
                     },
                 },
+                {
+                    binding: 3,
+                    resource: {
+                        buffer: sceneUniformBuffer,
+                    },
+                },
             ],
         });
         this.bindGroup = bindGroup
+
+        const sceneBindGroupForShadow = device.createBindGroup({
+            layout: uniformBufferBindGroupLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: sceneUniformBuffer,
+                    },
+                },
+            ],
+        });
+        this.sceneUniformBuffer = sceneUniformBuffer
+        this.sceneBindGroupForShadow = sceneBindGroupForShadow
+        this.lightPosition = vec3.fromValues(Math.random() * 200 - 100, 100 + Math.random() * 50, Math.random() * 200 - 100);
     }
 
-    update(device) {
+    update(device, viewProjMatrix) {
         let y = this.lightData[1]
         y -= 0.3
         if (y < lightExtentMin[1])
@@ -72,6 +105,58 @@ class PointLight {
         this.lightData[1] = y
 
         device.queue.writeBuffer(this.lightsBuffer, /*bufferOffset=*/0, this.lightData);
+
+        this.updateShadowSceneUniform(device, viewProjMatrix)
+    }
+
+    updateShadowSceneUniform(device, viewProjMatrix) {
+        const lightPosition = this.lightPosition
+        const sceneUniformBuffer = this.sceneUniformBuffer
+
+        const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
+        const lightProjectionMatrix = mat4.create();
+        {
+            const left = -80;
+            const right = 80;
+            const bottom = -80;
+            const top = 80;
+            const near = -200;
+            const far = 300;
+            mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
+        }
+
+        const lightViewProjMatrix = mat4.multiply(
+            lightProjectionMatrix,
+            lightViewMatrix
+        );
+
+        // The camera/light aren't moving, so write them into buffers now.
+        const lightMatrixData = lightViewProjMatrix /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            0,
+            lightMatrixData.buffer,
+            lightMatrixData.byteOffset,
+            lightMatrixData.byteLength
+        );
+
+        const cameraMatrixData = viewProjMatrix /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            64,
+            cameraMatrixData.buffer,
+            cameraMatrixData.byteOffset,
+            cameraMatrixData.byteLength
+        );
+
+        const lightData = lightPosition /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            128,
+            lightData.buffer,
+            lightData.byteOffset,
+            lightData.byteLength
+        );
     }
 }
 
@@ -252,6 +337,13 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                     sampleType: 'depth',
                 },
             },
+            {
+                binding: 4,
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                sampler: {
+                    type: 'comparison',
+                },
+            },
         ],
     });
 
@@ -274,6 +366,13 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             {
                 binding: 2,
                 visibility: GPUShaderStage.FRAGMENT,
+                buffer: {
+                    type: 'uniform',
+                },
+            },
+            {
+                binding: 3,
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
                 buffer: {
                     type: 'uniform',
                 },
@@ -344,6 +443,9 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                     },
                 },
             ],
+            constants: {
+                shadowDepthTextureSize,
+            },
         },
         primitive,
     });
@@ -372,8 +474,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     };
 
     const settings = {
-        // mode: 'rendering',
-        mode: 'gBuffers view',
+        mode: 'rendering',
+        // mode: 'gBuffers view',
         // numLights: 4,
         numLights: 8,
     };
@@ -472,27 +574,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         primitive,
     });
 
-    const sceneUniformBuffer = device.createBuffer({
-        // Two 4x4 viewProj matrices,
-        // one for the camera and one for the light.
-        // Then a vec3 for the light position.
-        // Rounded to the nearest multiple of 16.
-        size: 2 * 4 * 16 + 4 * 4,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    const sceneBindGroupForShadow = device.createBindGroup({
-        layout: uniformBufferBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: sceneUniformBuffer,
-                },
-            },
-        ],
-    });
-
     const modelBindGroup = device.createBindGroup({
         layout: uniformBufferBindGroupLayout,
         entries: [
@@ -569,6 +650,12 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                 binding: 3,
                 resource: gBufferTextureViews[3],
             },
+            {
+                binding: 4,
+                resource: device.createSampler({
+                    compare: 'less',
+                })
+            },
         ],
     });
 
@@ -623,66 +710,10 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         lightExtentData.byteLength
     );
 
-    const lightUpdateComputePipeline = device.createComputePipeline({
-        layout: 'auto',
-        compute: {
-            module: device.createShaderModule({
-                code: lightUpdate,
-            }),
-            entryPoint: 'main',
-        },
-    });
-    const lightsBufferBindGroup = device.createBindGroup({
-        layout: lightsBufferBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: lightsBuffer,
-                },
-            },
-            {
-                binding: 1,
-                resource: {
-                    buffer: configUniformBuffer,
-                },
-            },
-            {
-                binding: 2,
-                resource: {
-                    buffer: cameraUniformBuffer,
-                },
-            },
-        ],
-    });
-    const lightsBufferComputeBindGroup = device.createBindGroup({
-        layout: lightUpdateComputePipeline.getBindGroupLayout(0),
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: lightsBuffer,
-                },
-            },
-            {
-                binding: 1,
-                resource: {
-                    buffer: configUniformBuffer,
-                },
-            },
-            {
-                binding: 2,
-                resource: {
-                    buffer: lightExtentBuffer,
-                },
-            },
-        ],
-    });
-
 
     const pointLights = []
     for (let i = 0; i < kMaxNumLights; ++i) {
-        pointLights.push(new PointLight(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer))
+        pointLights.push(new PointLight(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout))
     }
 
 
@@ -691,8 +722,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
     // Scene matrices
     const eyePosition = vec3.fromValues(0, 50, -100);
-    const upVector = vec3.fromValues(0, 1, 0);
-    const origin = vec3.fromValues(0, 0, 0);
 
     const projectionMatrix = mat4.perspective(
         (2 * Math.PI) / 5,
@@ -742,73 +771,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         return viewProjMatrix /*as Float32Array*/;
     }
 
-    function updateShadowSceneUniform(viewProjMatrix) {
-        const t = Date.now() / 1000;
-        const tx = Math.PI * (t / 3);
-        const ty = Math.PI * (t / 4);
-        const tz = Math.PI * (t / 5);
-
-        const lx = Math.sin(tx) * 100;
-        const ly = 100 + Math.cos(ty) * 30;
-        const lz = Math.cos(tz) * 100;
-        const lightPosition = vec3.fromValues(lx, ly, lz);
-        // const lightPosition = vec3.fromValues(50, 100, -100);
-        const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
-        const lightProjectionMatrix = mat4.create();
-        {
-            const left = -80;
-            const right = 80;
-            const bottom = -80;
-            const top = 80;
-            const near = -200;
-            const far = 300;
-            mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
-        }
-
-        const lightViewProjMatrix = mat4.multiply(
-            lightProjectionMatrix,
-            lightViewMatrix
-        );
-
-
-        // The camera/light aren't moving, so write them into buffers now.
-        const lightMatrixData = lightViewProjMatrix /*as Float32Array*/;
-        device.queue.writeBuffer(
-            sceneUniformBuffer,
-            0,
-            lightMatrixData.buffer,
-            lightMatrixData.byteOffset,
-            lightMatrixData.byteLength
-        );
-
-        const cameraMatrixData = viewProjMatrix /*as Float32Array*/;
-        device.queue.writeBuffer(
-            sceneUniformBuffer,
-            64,
-            cameraMatrixData.buffer,
-            cameraMatrixData.byteOffset,
-            cameraMatrixData.byteLength
-        );
-
-        const lightData = lightPosition /*as Float32Array*/;
-        device.queue.writeBuffer(
-            sceneUniformBuffer,
-            128,
-            lightData.buffer,
-            lightData.byteOffset,
-            lightData.byteLength
-        );
-
-        const modelData = modelMatrix /*as Float32Array*/;
-        device.queue.writeBuffer(
-            modelUniformBuffer,
-            0,
-            modelData.buffer,
-            modelData.byteOffset,
-            modelData.byteLength
-        );
-    }
-
     function frame() {
         // Sample is no longer the active page.
         // if (!pageState.active) return;
@@ -830,24 +792,23 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             cameraInvViewProj.byteLength
         );
 
-        updateShadowSceneUniform(cameraViewProj);
+        {
+            const modelData = modelMatrix /*as Float32Array*/;
+            device.queue.writeBuffer(
+                modelUniformBuffer,
+                0,
+                modelData.buffer,
+                modelData.byteOffset,
+                modelData.byteLength
+            );
+        }
 
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
-            pointLight.update(device)
+            pointLight.update(device, cameraViewProj)
         }
 
         const commandEncoder = device.createCommandEncoder();
-        {  //シャドウマップの描画
-            const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptor);
-            shadowPass.setPipeline(shadowPipeline);
-            shadowPass.setBindGroup(0, sceneBindGroupForShadow);
-            shadowPass.setBindGroup(1, modelBindGroup);
-            shadowPass.setVertexBuffer(0, vertexBuffer);
-            shadowPass.setIndexBuffer(indexBuffer, 'uint16');
-            shadowPass.drawIndexed(indexCount);
-            shadowPass.end();
-        }
         {
             // Write position, normal, albedo etc. data to gBuffers
             const gBufferPass = commandEncoder.beginRenderPass(
@@ -869,9 +830,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         //     lightPass.end();
         // }
         {
-            // if (settings.mode === 'gBuffers view') {
-            if (true) {
-            // if (false) {
+            if (settings.mode === 'gBuffers view') {
                 // GBuffers debug view
                 // Left: depth
                 // Middle: normal
@@ -894,6 +853,18 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                 let desc = textureQuadPassDescriptor;
                 for (let i = 0; i < settings.numLights; ++i) {
                     const pointLight = pointLights[i]
+
+                    {  //シャドウマップの描画
+                        const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptor);
+                        shadowPass.setPipeline(shadowPipeline);
+                        shadowPass.setBindGroup(0, pointLight.sceneBindGroupForShadow);
+                        shadowPass.setBindGroup(1, modelBindGroup);
+                        shadowPass.setVertexBuffer(0, vertexBuffer);
+                        shadowPass.setIndexBuffer(indexBuffer, 'uint16');
+                        shadowPass.drawIndexed(indexCount);
+                        shadowPass.end();
+                    }
+
                     const deferredRenderingPass = commandEncoder.beginRenderPass(desc)
                     deferredRenderingPass.setPipeline(deferredRenderPipeline);
                     deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);

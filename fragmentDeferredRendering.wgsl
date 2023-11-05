@@ -1,7 +1,10 @@
+override shadowDepthTextureSize: f32 = 1024.0;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
 @group(0) @binding(2) var gBufferDepth: texture_depth_2d;
+@group(0) @binding(3) var shadowDepth: texture_depth_2d;
+@group(0) @binding(4) var shadowSampler: sampler_comparison;
 
 struct LightData {
     position : vec4<f32>,
@@ -31,15 +34,23 @@ fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
     return posWorld;
 }
 
+struct FragmentInput {
+    //@location(0) shadowPos : vec3<f32>,
+    //@location(1) fragPos : vec3<f32>,
+    //@location(2) fragNorm : vec3<f32>,
+
+    @builtin(position) coord : vec4<f32>,
+}
+
 @fragment
 fn main(
-    @builtin(position) coord : vec4<f32>
+    input : FragmentInput
 ) -> @location(0) vec4<f32> {
     var result : vec3<f32>;
 
     let depth = textureLoad(
         gBufferDepth,
-        vec2<i32>(floor(coord.xy)),
+        vec2<i32>(floor(input.coord.xy)),
         0
     );
 
@@ -49,18 +60,18 @@ fn main(
     }
 
     let bufferSize = textureDimensions(gBufferDepth);
-    let coordUV = coord.xy / vec2<f32>(bufferSize);
+    let coordUV = input.coord.xy / vec2<f32>(bufferSize);
     let position = world_from_screen_coord(coordUV, depth);
 
     let normal = textureLoad(
         gBufferNormal,
-        vec2<i32>(floor(coord.xy)),
+        vec2<i32>(floor(input.coord.xy)),
         0
     ).xyz;
 
     let albedo = textureLoad(
         gBufferAlbedo,
-        vec2<i32>(floor(coord.xy)),
+        vec2<i32>(floor(input.coord.xy)),
         0
     ).rgb;
 
@@ -78,6 +89,8 @@ fn main(
 
     // some manual ambient
     // result += vec3(0.2);
+
+    let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
 
     return vec4(result, 1.0);
 }
