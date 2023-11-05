@@ -5,7 +5,7 @@ const kMaxNumLights = 1024;
 const lightExtentMin = vec3.fromValues(-50, -30, -50);
 const lightExtentMax = vec3.fromValues(50, 50, 50);
 
-const shadowDepthTextureSize = 1024;
+const shadowDepthTextureSize = 512;
 
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
@@ -362,6 +362,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                 visibility: GPUShaderStage.FRAGMENT,
                 texture: {
                     sampleType: 'depth',
+                    viewDimension: '2d-array',
                 },
             },
             {
@@ -409,6 +410,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     });
 
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
+        label: 'gBuffersDebugViewPipeline',
         layout: device.createPipelineLayout({
             bindGroupLayouts: [
                 gBufferTexturesBindGroupLayout,
@@ -568,7 +570,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
     // Create the depth texture for rendering/sampling the shadow map.
     const shadowDepthTexture = device.createTexture({
-        size: [shadowDepthTextureSize, shadowDepthTextureSize, 1],
+        size: [shadowDepthTextureSize, shadowDepthTextureSize, 9],
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         format: 'depth32float',
     });
@@ -611,7 +613,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const shadowPassDescriptor /*: GPURenderPassDescriptor*/ = {
         colorAttachments: [],
         depthStencilAttachment: {
-            view: shadowDepthTextureView,
+            view: shadowDepthTexture.createView({arrayLayerCount: 1, baseArrayLayer: 0}),
             depthClearValue: 1.0,
             depthLoadOp: 'clear',
             depthStoreOp: 'store',

@@ -1,9 +1,9 @@
-override shadowDepthTextureSize: f32 = 1024.0;
+override shadowDepthTextureSize: f32 = 256.0;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
 @group(0) @binding(2) var gBufferDepth: texture_depth_2d;
-@group(0) @binding(3) var shadowMap: texture_depth_2d;
+@group(0) @binding(3) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
 
 struct Scene {
@@ -101,7 +101,7 @@ fn main(
             let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
             visibility += textureSampleCompare(
                 shadowMap, shadowSampler,
-                shadowPos.xy + offset, shadowPos.z - 0.007
+                shadowPos.xy + offset, 0, shadowPos.z - 0.007
             );
         }
     }
