@@ -2,6 +2,7 @@
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
 @group(0) @binding(2) var gBufferDepth: texture_depth_2d;
+@group(0) @binding(3) var shadowDepth: texture_depth_2d;
 
 override canvasSizeWidth: f32;
 override canvasSizeHeight: f32;
@@ -14,12 +15,15 @@ fn main(
     let c = coord.xy / vec2<f32>(canvasSizeWidth, canvasSizeHeight);
     if (c.x < 0.33333) {
         let rawDepth = textureLoad(
-            gBufferDepth,
-            vec2<i32>(floor(coord.xy)),
+            //gBufferDepth,
+            //vec2<i32>(floor(coord.xy)),
+            shadowDepth,
+            vec2<i32>(floor(c * vec2<f32>(1024.0, 1024.0))),  // shadowDepthTextureSize
             0
         );
         // remap depth into something a bit more visible
-        let depth = (1.0 - rawDepth) * 50.0;
+        // let depth = (1.0 - rawDepth) * 50.0;
+        let depth = (1.0 - rawDepth) * 2.0;
         result = vec4(depth);
     } else if (c.x < 0.66667) {
         result = textureLoad(

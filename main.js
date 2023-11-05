@@ -162,12 +162,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
-    const gBufferTextureViews = [
-        gBufferTexture2DFloat16.createView(),
-        gBufferTextureAlbedo.createView(),
-        depthTexture.createView(),
-    ];
-
     const vertexBuffers /*: Iterable<GPUVertexBufferLayout>*/ = [
         {
             arrayStride: Float32Array.BYTES_PER_ELEMENT * 8,
@@ -246,6 +240,13 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             },
             {
                 binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'depth',
+                },
+            },
+            {
+                binding: 3,
                 visibility: GPUShaderStage.FRAGMENT,
                 texture: {
                     sampleType: 'depth',
@@ -347,32 +348,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         primitive,
     });
 
-    const writeGBufferPassDescriptor /*: GPURenderPassDescriptor*/ = {
-        colorAttachments: [
-            {
-                view: gBufferTextureViews[0],
-
-                clearValue: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
-                loadOp: 'clear',
-                storeOp: 'store',
-            },
-            {
-                view: gBufferTextureViews[1],
-
-                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-                loadOp: 'clear',
-                storeOp: 'store',
-            },
-        ],
-        depthStencilAttachment: {
-            view: depthTexture.createView(),
-
-            depthClearValue: 1.0,
-            depthLoadOp: 'clear',
-            depthStoreOp: 'store',
-        },
-    };
-
     const textureQuadPassDescriptor /*: GPURenderPassDescriptor*/ = {
         colorAttachments: [
             {
@@ -397,7 +372,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     };
 
     const settings = {
-        mode: 'rendering',
+        // mode: 'rendering',
+        mode: 'gBuffers view',
         // numLights: 4,
         numLights: 8,
     };
@@ -541,6 +517,39 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
     // ^^^ シャドウマップ関連 ^^^
 
+    const gBufferTextureViews = [
+        gBufferTexture2DFloat16.createView(),
+        gBufferTextureAlbedo.createView(),
+        depthTexture.createView(),
+        shadowDepthTexture.createView(),
+    ];
+
+    const writeGBufferPassDescriptor /*: GPURenderPassDescriptor*/ = {
+        colorAttachments: [
+            {
+                view: gBufferTextureViews[0],
+
+                clearValue: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+            {
+                view: gBufferTextureViews[1],
+
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+        ],
+        depthStencilAttachment: {
+            view: depthTexture.createView(),
+
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+        },
+    };
+
     const gBufferTexturesBindGroup = device.createBindGroup({
         layout: gBufferTexturesBindGroupLayout,
         entries: [
@@ -555,6 +564,10 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             {
                 binding: 2,
                 resource: gBufferTextureViews[2],
+            },
+            {
+                binding: 3,
+                resource: gBufferTextureViews[3],
             },
         ],
     });
@@ -729,7 +742,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         return viewProjMatrix /*as Float32Array*/;
     }
 
-    function updateShadowSceneUniform() {
+    function updateShadowSceneUniform(viewProjMatrix) {
         const t = Date.now() / 1000;
         const tx = Math.PI * (t / 3);
         const ty = Math.PI * (t / 4);
@@ -739,6 +752,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         const ly = 100 + Math.cos(ty) * 30;
         const lz = Math.cos(tz) * 100;
         const lightPosition = vec3.fromValues(lx, ly, lz);
+        // const lightPosition = vec3.fromValues(50, 100, -100);
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         const lightProjectionMatrix = mat4.create();
         {
@@ -816,7 +830,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             cameraInvViewProj.byteLength
         );
 
-        updateShadowSceneUniform();
+        updateShadowSceneUniform(cameraViewProj);
 
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
@@ -855,7 +869,9 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         //     lightPass.end();
         // }
         {
-            if (settings.mode === 'gBuffers view') {
+            // if (settings.mode === 'gBuffers view') {
+            if (true) {
+            // if (false) {
                 // GBuffers debug view
                 // Left: depth
                 // Middle: normal
