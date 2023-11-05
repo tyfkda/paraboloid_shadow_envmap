@@ -3,8 +3,16 @@ override shadowDepthTextureSize: f32 = 1024.0;
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
 @group(0) @binding(2) var gBufferDepth: texture_depth_2d;
-@group(0) @binding(3) var shadowDepth: texture_depth_2d;
+@group(0) @binding(3) var shadowMap: texture_depth_2d;
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
+
+struct Scene {
+    lightViewProjMatrix: mat4x4<f32>,
+    cameraViewProjMatrix: mat4x4<f32>,
+    lightPos: vec3<f32>,
+}
+
+@group(2) @binding(0) var<uniform> scene : Scene;
 
 struct LightData {
     position : vec4<f32>,
@@ -69,28 +77,39 @@ fn main(
         0
     ).xyz;
 
+    // XY is in (-1, 1) space, Z is in (0, 1) space
+    let posFromLight = scene.lightViewProjMatrix * vec4(position, 1.0);
+
+    // Convert XY to (0, 1)
+    // Y is flipped because texture coords are Y-down.
+    var shadowPos = vec3(
+        posFromLight.xy * vec2(0.5, -0.5) + vec2(0.5),
+        posFromLight.z
+    );
+
+    // Percentage-closer filtering. Sample texels in the region
+    // to smooth the result.
+    var visibility = 0.0;
+    let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
+            visibility += textureSampleCompare(
+                shadowMap, shadowSampler,
+                shadowPos.xy + offset, shadowPos.z - 0.007
+            );
+        }
+    }
+    visibility /= 9.0;
+
+    let lambertFactor = max(dot(normalize(scene.lightPos - position), normal), 0.0);
+    let lightingFactor = min(visibility * lambertFactor, 1.0);
+
     let albedo = textureLoad(
         gBufferAlbedo,
         vec2<i32>(floor(input.coord.xy)),
         0
     ).rgb;
 
-    // for (var i = 0u; i < config.numLights; i++) {
-    const i = 0u;
-        let L = lightsBuffer.lights[i].position.xyz - position;
-        let distance = length(L);
-        if (distance <= lightsBuffer.lights[i].radius) {
-            let lambert = max(dot(normal, normalize(L)), 0.0);
-            result += vec3<f32>(
-                lambert * pow(1.0 - distance / lightsBuffer.lights[i].radius, 2.0) * lightsBuffer.lights[i].color * albedo
-            );
-        }
-    // }
-
-    // some manual ambient
-    // result += vec3(0.2);
-
-    let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
-
-    return vec4(result, 1.0);
+    return vec4(0.5 * lightingFactor * albedo, 1.0);
 }

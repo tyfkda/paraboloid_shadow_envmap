@@ -94,7 +94,8 @@ class PointLight {
         });
         this.sceneUniformBuffer = sceneUniformBuffer
         this.sceneBindGroupForShadow = sceneBindGroupForShadow
-        this.lightPosition = vec3.fromValues(Math.random() * 200 - 100, 100 + Math.random() * 50, Math.random() * 200 - 100);
+        const W = 150
+        this.lightPosition = vec3.fromValues(Math.random() * (W * 2) - W, 100 + Math.random() * 50, Math.random() * (W * 2) - W);
     }
 
     update(device, viewProjMatrix) {
@@ -121,7 +122,7 @@ class PointLight {
             const bottom = -80;
             const top = 80;
             const near = -200;
-            const far = 300;
+            const far = 400;  // 300;
             mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
         }
 
@@ -307,7 +308,21 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         primitive,
     });
 
+    const uniformBufferBindGroupLayout = device.createBindGroupLayout({
+        label: 'uniformBufferBindGroupLayout',
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                buffer: {
+                    type: 'uniform',
+                },
+            },
+        ],
+    });
+
     const gBufferTexturesBindGroupLayout = device.createBindGroupLayout({
+        label: 'gBufferTexturesBindGroupLayout',
         entries: [
             {
                 binding: 0,
@@ -348,6 +363,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     });
 
     const lightsBufferBindGroupLayout = device.createBindGroupLayout({
+        label: 'lightsBufferBindGroupLayout',
         entries: [
             {
                 binding: 0,
@@ -382,7 +398,11 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [gBufferTexturesBindGroupLayout],
+            bindGroupLayouts: [
+                gBufferTexturesBindGroupLayout,
+                lightsBufferBindGroupLayout,
+                uniformBufferBindGroupLayout,
+            ],
         }),
         vertex: {
             module: device.createShaderModule({
@@ -409,10 +429,12 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     });
 
     const deferredRenderPipeline = device.createRenderPipeline({
+        label: 'deferredRenderPipeline',
         layout: device.createPipelineLayout({
             bindGroupLayouts: [
                 gBufferTexturesBindGroupLayout,
                 lightsBufferBindGroupLayout,
+                uniformBufferBindGroupLayout,
             ],
         }),
         vertex: {
@@ -476,8 +498,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const settings = {
         mode: 'rendering',
         // mode: 'gBuffers view',
-        // numLights: 4,
-        numLights: 8,
+        numLights: 3,
+        // numLights: 8,
     };
     const configUniformBuffer = (() => {
         const buffer = device.createBuffer({
@@ -539,18 +561,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         format: 'depth32float',
     });
     const shadowDepthTextureView = shadowDepthTexture.createView();
-
-    const uniformBufferBindGroupLayout = device.createBindGroupLayout({
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.VERTEX,
-                buffer: {
-                    type: 'uniform',
-                },
-            },
-        ],
-    });
 
     const shadowPipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({
@@ -757,10 +767,10 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     );
 
     // Rotates the camera around the origin based on time.
-    function getCameraViewProjMatrix() {
+    function getCameraViewProjMatrix(t) {
         const eyePosition = vec3.fromValues(0, 50, -100);
 
-        const rad = Math.PI * (Date.now() / 5000);
+        const rad = t * (Math.PI / 50);
         const rotation = mat4.rotateY(mat4.translation(origin), rad);
         vec3.transformMat4(eyePosition, rotation, eyePosition);
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
@@ -775,7 +785,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         // Sample is no longer the active page.
         // if (!pageState.active) return;
 
-        const cameraViewProj = getCameraViewProjMatrix();
+        const t = Date.now() * (1 / 1000);
+        const cameraViewProj = getCameraViewProjMatrix(t);
         device.queue.writeBuffer(
             cameraUniformBuffer,
             0,
@@ -869,6 +880,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                     deferredRenderingPass.setPipeline(deferredRenderPipeline);
                     deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);
                     deferredRenderingPass.setBindGroup(1, pointLight.bindGroup);
+                    deferredRenderingPass.setBindGroup(2, pointLight.sceneBindGroupForShadow);
                     deferredRenderingPass.draw(6);
                     deferredRenderingPass.end();
                     desc = textureQuadPassDescriptorWithoutClear
