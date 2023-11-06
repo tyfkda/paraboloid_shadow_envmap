@@ -45,8 +45,9 @@ class PointLight {
             // Two 4x4 viewProj matrices,
             // one for the camera and one for the light.
             // Then a vec3 for the light position.
+            // Then a vec3 for the light color.
             // Rounded to the nearest multiple of 16.
-            size: 2 * 4 * 16 + 4 * 4,
+            size: 2 * 4 * 16 + 4 * 4 * 2,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
@@ -96,6 +97,7 @@ class PointLight {
         this.sceneBindGroupForShadow = sceneBindGroupForShadow
         const W = 150
         this.lightPosition = vec3.fromValues(Math.random() * (W * 2) - W, 100 + Math.random() * 50, Math.random() * (W * 2) - W);
+        this.lightColor = vec3.fromValues(Math.random(), Math.random(), Math.random());
     }
 
     update(device, viewProjMatrix) {
@@ -157,6 +159,15 @@ class PointLight {
             lightData.buffer,
             lightData.byteOffset,
             lightData.byteLength
+        );
+
+        const lightColor = this.lightColor /*as Float32Array*/;
+        device.queue.writeBuffer(
+            sceneUniformBuffer,
+            144,
+            lightColor.buffer,
+            lightColor.byteOffset,
+            lightColor.byteLength
         );
     }
 }
