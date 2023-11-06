@@ -81,6 +81,10 @@ fn main(
     // XY is in (-1, 1) space, Z is in (0, 1) space
     let posFromLight = scene.lightViewProjMatrix * vec4(position, 1.0);
 
+    if (dot(posFromLight.xy, posFromLight.xy) >= 1) {
+        discard;
+    }
+
     // Convert XY to (0, 1)
     // Y is flipped because texture coords are Y-down.
     var shadowPos = vec3(

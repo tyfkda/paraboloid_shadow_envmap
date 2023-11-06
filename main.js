@@ -119,10 +119,11 @@ class PointLight {
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         const lightProjectionMatrix = mat4.create();
         {
-            const left = -80;
-            const right = 80;
-            const bottom = -80;
-            const top = 80;
+            const W = 80 / 2;
+            const left = -W;
+            const right = W;
+            const bottom = -W;
+            const top = W;
             const near = -200;
             const far = 400;  // 300;
             mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
@@ -509,7 +510,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const settings = {
         mode: 'rendering',
         // mode: 'gBuffers view',
-        numLights: 3,
+        numLights: 1,
         // numLights: 8,
     };
     const configUniformBuffer = (() => {
