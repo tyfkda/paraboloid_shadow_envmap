@@ -24,7 +24,7 @@ fn main(
     var output : VertexOutput;
     let worldPosition = (uniforms.modelMatrix * vec4(position, 1.0)).xyz;
     output.Position = camera.viewProjectionMatrix * vec4(worldPosition, 1.0);
-    output.fragNormal = normalize((uniforms.normalModelMatrix * vec4(normal, 1.0)).xyz);
+    output.fragNormal = normalize((uniforms.normalModelMatrix * vec4(normal, 0.0)).xyz);
     output.fragUV = uv;
     return output;
 }
