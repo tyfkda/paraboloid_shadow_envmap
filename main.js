@@ -11,7 +11,7 @@ const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
 
 class PointLight {
-    constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout) {
+    constructor(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout, lightColor) {
         const extent = vec3.sub(lightExtentMax, lightExtentMin);
         const lightData = new Float32Array(8);
         const tmpVec4 = vec4.create();
@@ -97,7 +97,7 @@ class PointLight {
         this.sceneBindGroupForShadow = sceneBindGroupForShadow
         const W = 150
         this.lightPosition = vec3.fromValues(Math.random() * (W * 2) - W, 100 + Math.random() * 50, Math.random() * (W * 2) - W);
-        this.lightColor = vec3.fromValues(Math.random(), Math.random(), Math.random());
+        this.lightColor = lightColor
     }
 
     update(device, viewProjMatrix) {
@@ -510,7 +510,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const settings = {
         mode: 'rendering',
         // mode: 'gBuffers view',
-        numLights: 1,
+        numLights: 3,
         // numLights: 8,
     };
     const configUniformBuffer = (() => {
@@ -734,8 +734,14 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
 
     const pointLights = []
+    const colors = [
+        vec3.fromValues(1.0, 0.0, 0.0),
+        vec3.fromValues(0.0, 1.0, 0.0),
+        vec3.fromValues(0.0, 0.0, 1.0),
+    ]
     for (let i = 0; i < kMaxNumLights; ++i) {
-        pointLights.push(new PointLight(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout))
+        const color = colors[i % colors.length]
+        pointLights.push(new PointLight(device, lightsBufferBindGroupLayout, configUniformBuffer, cameraUniformBuffer, uniformBufferBindGroupLayout, color))
     }
 
 
@@ -782,7 +788,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     function getCameraViewProjMatrix(t) {
         const eyePosition = vec3.fromValues(0, 50, -100);
 
-        const rad = t * (Math.PI / 50);
+        const rad = t * (Math.PI / 10);
         const rotation = mat4.rotateY(mat4.translation(origin), rad);
         vec3.transformMat4(eyePosition, rotation, eyePosition);
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
