@@ -1,3 +1,5 @@
+const kMaxNumLights = 9;
+
 override shadowDepthTextureSize: f32 = 256.0;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
@@ -6,14 +8,13 @@ override shadowDepthTextureSize: f32 = 256.0;
 @group(0) @binding(3) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
 
-struct Scene {
-    lightViewProjMatrix: mat4x4<f32>,
-    cameraViewProjMatrix: mat4x4<f32>,
-    lightPos: vec3<f32>,
-    lightColor: vec3<f32>,
+struct Light {
+    viewProjMatrix: mat4x4<f32>,
+    pos: vec3<f32>,
+    color: vec3<f32>,
 }
 
-@group(2) @binding(0) var<uniform> scene : Scene;
+@group(2) @binding(0) var<uniform> lights : array<Light, kMaxNumLights>;
 
 struct LightData {
     position : vec4<f32>,
@@ -55,66 +56,63 @@ struct FragmentInput {
 fn main(
     input : FragmentInput
 ) -> @location(0) vec4<f32> {
-    var result : vec3<f32>;
+    var total : vec3<f32> = vec3(0, 0, 0);
 
-    let depth = textureLoad(
-        gBufferDepth,
-        vec2<i32>(floor(input.coord.xy)),
-        0
-    );
+    for (var lightIndex = 0u; lightIndex < config.numLights; lightIndex += 1) {
+        let light = lights[lightIndex];
+        let depth = textureLoad(
+            gBufferDepth,
+            vec2<i32>(floor(input.coord.xy)),
+            0
+        );
+        let hasPixel = select(0.0, 1.0, depth < 1.0);
 
-    // Don't light the sky.
-    if (depth >= 1.0) {
-        discard;
-    }
+        let bufferSize = textureDimensions(gBufferDepth);
+        let coordUV = input.coord.xy / vec2<f32>(bufferSize);
+        let position = world_from_screen_coord(coordUV, depth);
 
-    let bufferSize = textureDimensions(gBufferDepth);
-    let coordUV = input.coord.xy / vec2<f32>(bufferSize);
-    let position = world_from_screen_coord(coordUV, depth);
+        let normal = textureLoad(
+            gBufferNormal,
+            vec2<i32>(floor(input.coord.xy)),
+            0
+        ).xyz;
 
-    let normal = textureLoad(
-        gBufferNormal,
-        vec2<i32>(floor(input.coord.xy)),
-        0
-    ).xyz;
+        // XY is in (-1, 1) space, Z is in (0, 1) space
+        let posFromLight = light.viewProjMatrix * vec4(position, 1.0);
+        let inSpotLight = select(0.0, 1.0, dot(posFromLight.xy, posFromLight.xy) < 1);
 
-    // XY is in (-1, 1) space, Z is in (0, 1) space
-    let posFromLight = scene.lightViewProjMatrix * vec4(position, 1.0);
+        // Convert XY to (0, 1)
+        // Y is flipped because texture coords are Y-down.
+        var shadowPos = vec3(
+            posFromLight.xy * vec2(0.5, -0.5) + vec2(0.5),
+            posFromLight.z
+        );
 
-    if (dot(posFromLight.xy, posFromLight.xy) >= 1) {
-        discard;
-    }
-
-    // Convert XY to (0, 1)
-    // Y is flipped because texture coords are Y-down.
-    var shadowPos = vec3(
-        posFromLight.xy * vec2(0.5, -0.5) + vec2(0.5),
-        posFromLight.z
-    );
-
-    // Percentage-closer filtering. Sample texels in the region
-    // to smooth the result.
-    var visibility = 0.0;
-    let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
-            visibility += textureSampleCompare(
-                shadowMap, shadowSampler,
-                shadowPos.xy + offset, 0, shadowPos.z - 0.007
-            );
+        // Percentage-closer filtering. Sample texels in the region
+        // to smooth the result.
+        var visibility = 0.0;
+        let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
+        for (var y = -1; y <= 1; y++) {
+            for (var x = -1; x <= 1; x++) {
+                let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
+                visibility += textureSampleCompare(
+                    shadowMap, shadowSampler,
+                    shadowPos.xy + offset, lightIndex, shadowPos.z - 0.007
+                );
+            }
         }
+        visibility /= 9.0;
+
+        let lambertFactor = max(dot(normalize(light.pos - position), normal), 0.0);
+        let lightingFactor = min(visibility * lambertFactor, 1.0);
+
+        let albedo = textureLoad(
+            gBufferAlbedo,
+            vec2<i32>(floor(input.coord.xy)),
+            0
+        ).rgb;
+        total += 0.5 * hasPixel * inSpotLight * lightingFactor * light.color.rgb * albedo;
     }
-    visibility /= 9.0;
 
-    let lambertFactor = max(dot(normalize(scene.lightPos - position), normal), 0.0);
-    let lightingFactor = min(visibility * lambertFactor, 1.0);
-
-    let albedo = textureLoad(
-        gBufferAlbedo,
-        vec2<i32>(floor(input.coord.xy)),
-        0
-    ).rgb;
-
-    return vec4(0.5 * lightingFactor * scene.lightColor.rgb * albedo, 1.0);
+    return vec4(total, 1.0);
 }
