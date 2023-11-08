@@ -10,17 +10,38 @@ const shadowDepthTextureSize = 512;
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
 
+function deg2rad(degree) {
+    return degree * (Math.PI / 180)
+}
+
+function randomRange(min, max) {
+    return Math.random() * (max - min) + min
+}
+
+function posNegRand(min, max) {
+    const flag = Math.floor(Math.random() * 2) * 2 - 1
+    return flag * randomRange(min, max)
+}
+
 class PointLight {
     constructor(lightColor) {
-        const extent = vec3.sub(lightExtentMax, lightExtentMin);
-        const W = 150
-        this.lightPosition = vec3.fromValues(Math.random() * (W * 2) - W, 100 + Math.random() * 50, Math.random() * (W * 2) - W);
+        const r = randomRange(100, 200)
+        const t = randomRange(-Math.PI, Math.PI)
+        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 100 + Math.random() * 50, Math.cos(t) * r);
         this.lightColor = lightColor
+
+        this.rx = posNegRand(deg2rad(60), deg2rad(90))
+        this.ry = posNegRand(deg2rad(60), deg2rad(90))
     }
 
-    update(device, sceneUniformBuffer, index) {
-        const lightPosition = this.lightPosition
+    update(device, sceneUniformBuffer, index, t) {
         const offset = (1 * 4 * 16 + 4 * 4 * 2) * index;
+
+        const lightPosition = this.lightPosition
+
+        const panMatrix = mat4.rotateY(
+            mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
+            Math.sin(t * this.ry) * deg2rad(15))
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         // const lightProjectionMatrix = mat4.create();
@@ -36,7 +57,7 @@ class PointLight {
             // mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
             const aspect = 1.0
             lightProjectionMatrix = mat4.perspective(
-                (2 * Math.PI) / 10,
+                (2 * Math.PI) / 12,
                 aspect,
                 3,
                 400.0
@@ -45,8 +66,7 @@ class PointLight {
 
         const lightViewProjMatrix = mat4.multiply(
             lightProjectionMatrix,
-            lightViewMatrix
-        );
+            mat4.multiply(panMatrix, lightViewMatrix))
 
         // The camera/light aren't moving, so write them into buffers now.
         const lightMatrixData = lightViewProjMatrix /*as Float32Array*/;
@@ -787,7 +807,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
-            pointLight.update(device, sceneUniformBuffer, i)
+            pointLight.update(device, sceneUniformBuffer, i, t)
         }
 
         const commandEncoder = device.createCommandEncoder();
