@@ -23,16 +23,24 @@ class PointLight {
         const offset = (1 * 4 * 16 + 4 * 4 * 2) * index;
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
-        const lightProjectionMatrix = mat4.create();
+        // const lightProjectionMatrix = mat4.create();
+        let lightProjectionMatrix
         {
-            const W = 80 / 2;
-            const left = -W;
-            const right = W;
-            const bottom = -W;
-            const top = W;
-            const near = -200;
-            const far = 400;  // 300;
-            mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
+            // const W = 80 / 2;
+            // const left = -W;
+            // const right = W;
+            // const bottom = -W;
+            // const top = W;
+            // const near = -200;
+            // const far = 400;  // 300;
+            // mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
+            const aspect = 1.0
+            lightProjectionMatrix = mat4.perspective(
+                (2 * Math.PI) / 10,
+                aspect,
+                3,
+                400.0
+            );
         }
 
         const lightViewProjMatrix = mat4.multiply(
@@ -687,7 +695,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         vec3.fromValues(0.0, 0.0, 1.0),
     ]
     for (let i = 0; i < kMaxNumLights; ++i) {
-        const color = colors[i % colors.length]
+        const intensity = 500000
+        const color = vec3.scale(colors[i % colors.length], intensity)
         pointLights.push(new PointLight(color))
     }
 
@@ -733,11 +742,8 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
 
     // Rotates the camera around the origin based on time.
     function getCameraViewProjMatrix(t) {
-        const eyePosition = vec3.fromValues(0, 50, -100);
-
         const rad = t * (Math.PI / 10);
         const rotation = mat4.rotateY(mat4.translation(origin), rad);
-        vec3.transformMat4(eyePosition, rotation, eyePosition);
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
