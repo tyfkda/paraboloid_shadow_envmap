@@ -362,18 +362,18 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             targets: [
                 {
                     format: presentationFormat,
-                    blend: {
-                        color: {
-                            srcFactor: 'one',
-                            dstFactor: 'src-alpha',
-                            operation: 'add',
-                        },
-                        alpha: {
-                            srcFactor: 'src-alpha',
-                            dstFactor: 'zero',
-                            operation: 'add',
-                        },
-                    },
+                    // blend: {
+                    //     color: {
+                    //         srcFactor: 'one',
+                    //         dstFactor: 'src-alpha',
+                    //         operation: 'add',
+                    //     },
+                    //     alpha: {
+                    //         srcFactor: 'src-alpha',
+                    //         dstFactor: 'zero',
+                    //         operation: 'add',
+                    //     },
+                    // },
                 },
             ],
             constants: {
