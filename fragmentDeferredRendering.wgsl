@@ -1,4 +1,6 @@
 const kMaxNumLights = 9;
+const SHADOW_Z_OFFSET = 0.001;  // 0.007;
+const PI = 3.14159265359;
 
 override shadowDepthTextureSize: f32 = 256.0;
 
@@ -78,7 +80,8 @@ fn main(
         ).xyz;
 
         // XY is in (-1, 1) space, Z is in (0, 1) space
-        let posFromLight = light.viewProjMatrix * vec4(position, 1.0);
+        let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
+        let posFromLight = posFromLight0.xyz / posFromLight0.w;
         let inSpotLight = select(0.0, 1.0, dot(posFromLight.xy, posFromLight.xy) < 1);
 
         // Convert XY to (0, 1)
@@ -97,21 +100,26 @@ fn main(
                 let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
                 visibility += textureSampleCompare(
                     shadowMap, shadowSampler,
-                    shadowPos.xy + offset, lightIndex, shadowPos.z - 0.007
+                    shadowPos.xy + offset, lightIndex,
+                    shadowPos.z - SHADOW_Z_OFFSET
                 );
             }
         }
         visibility /= 9.0;
 
-        let lambertFactor = max(dot(normalize(light.pos - position), normal), 0.0);
-        let lightingFactor = min(visibility * lambertFactor, 1.0);
+        let diff = light.pos - position;
+        let invlen = inverseSqrt(dot(diff, diff));
+        let lambertFactor = max(dot(diff * invlen, normal), 0.0);
+        let decay = 1.0 / (4 * PI) * (invlen * invlen);
+        let lightingFactor = visibility * lambertFactor * decay;
 
         let albedo = textureLoad(
             gBufferAlbedo,
             vec2<i32>(floor(input.coord.xy)),
             0
         ).rgb;
-        total += 0.5 * hasPixel * inSpotLight * lightingFactor * light.color.rgb * albedo;
+
+        total += hasPixel * inSpotLight * lightingFactor * light.color.rgb * albedo;
     }
 
     return vec4(total, 1.0);

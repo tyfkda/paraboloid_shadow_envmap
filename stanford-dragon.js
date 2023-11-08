@@ -21,13 +21,16 @@ mesh.triangles.push(
     [mesh.positions.length, mesh.positions.length + 1, mesh.positions.length + 3],
 )
 
+const GROUND_W = 200
+const GROUND_Y = 30
+
 // Push vertex attributes for an additional ground plane
 // prettier-ignore
 mesh.positions.push(
-    [-100, 20, -100], //
-    [ 100, 20,  100], //
-    [-100, 20,  100], //
-    [ 100, 20, -100],
+    [-GROUND_W, GROUND_Y, -GROUND_W], //
+    [ GROUND_W, GROUND_Y,  GROUND_W], //
+    [-GROUND_W, GROUND_Y,  GROUND_W], //
+    [ GROUND_W, GROUND_Y, -GROUND_W],
 )
 mesh.normals.push(
     [0, 1, 0], //
