@@ -1,4 +1,5 @@
 import {mat4, vec3, vec4} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
+import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh} from './stanford-dragon.js'
 
 const kMaxNumLights = 9;
@@ -86,11 +87,10 @@ class PointLight {
     }
 }
 
-const init = async ({ canvas /*, pageState, gui*/ }) => {
+const init = async ({ canvas, gui }) => {
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
 
-    // if (!pageState.active) return;
     const context = canvas.getContext('webgpu');
 
     let vertexWriteGBuffers
@@ -409,17 +409,17 @@ const init = async ({ canvas /*, pageState, gui*/ }) => {
         return buffer;
     })();
 
-    // gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
-    // gui
-    //     .add(settings, 'numLights', 1, kMaxNumLights)
-    //     .step(1)
-    //     .onChange(() => {
-    //         device.queue.writeBuffer(
-    //             configUniformBuffer,
-    //             0,
-    //             new Uint32Array([settings.numLights])
-    //         );
-    //     });
+    gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
+    gui
+        .add(settings, 'numLights', 1, kMaxNumLights)
+        .step(1)
+        .onChange(() => {
+            device.queue.writeBuffer(
+                configUniformBuffer,
+                0,
+                new Uint32Array([settings.numLights])
+            );
+        });
 
     const modelUniformBuffer = device.createBuffer({
         size: 4 * 16 * 2, // two 4x4 matrix
@@ -679,7 +679,6 @@ const init = async ({ canvas /*, pageState, gui*/ }) => {
 
     function frame() {
         // Sample is no longer the active page.
-        // if (!pageState.active) return;
 
         const t = Date.now() * (1 / 1000);
         const cameraViewProj = getCameraViewProjMatrix(t);
@@ -777,7 +776,9 @@ const init = async ({ canvas /*, pageState, gui*/ }) => {
 async function main() {
     const canvas = document.querySelector('canvas')
 
-    await init({canvas})
+    const gui = new dat.GUI();
+
+    await init({canvas, gui})
 }
 
 await main()
