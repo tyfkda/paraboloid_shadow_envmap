@@ -10,24 +10,6 @@ override shadowDepthTextureSize: f32 = 256.0;
 @group(0) @binding(3) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
 
-struct Light {
-    viewProjMatrix: mat4x4<f32>,
-    pos: vec3<f32>,
-    color: vec3<f32>,
-}
-
-@group(2) @binding(0) var<uniform> lights : array<Light, kMaxNumLights>;
-
-struct LightData {
-    position : vec4<f32>,
-    color : vec3<f32>,
-    radius : f32,
-}
-struct LightsBuffer {
-    lights: array<LightData>,
-}
-@group(1) @binding(0) var<storage, read> lightsBuffer: LightsBuffer;
-
 struct Config {
     numLights : u32,
 }
@@ -35,8 +17,16 @@ struct Camera {
     viewProjectionMatrix : mat4x4<f32>,
     invViewProjectionMatrix : mat4x4<f32>,
 }
-@group(1) @binding(1) var<uniform> config: Config;
-@group(1) @binding(2) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> config: Config;
+@group(1) @binding(1) var<uniform> camera: Camera;
+
+struct Light {
+    viewProjMatrix: mat4x4<f32>,
+    pos: vec3<f32>,
+    color: vec3<f32>,
+}
+
+@group(2) @binding(0) var<uniform> lights : array<Light, kMaxNumLights>;
 
 fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
     // reconstruct world-space position from the screen coordinate.

@@ -1,8 +1,4 @@
 struct VertexOutput {
-    //@location(0) shadowPos: vec3<f32>,
-    //@location(1) fragPos: vec3<f32>,
-    //@location(2) fragNorm: vec3<f32>,
-
     @builtin(position) Position: vec4<f32>,
 }
 

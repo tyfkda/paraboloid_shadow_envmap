@@ -2,10 +2,10 @@
 import {vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
 
 export function computeSurfaceNormals(
-  positions /*: [number, number, number][]*/,
-  triangles /*: [number, number, number][]*/
-) /*: [number, number, number][]*/ {
-  const normals /*: [number, number, number][]*/ = positions.map(() => {
+  positions,
+  triangles
+) {
+  const normals = positions.map(() => {
     // Initialize to zero.
     return [0, 0, 0]
   })
@@ -36,18 +36,18 @@ export function computeSurfaceNormals(
 
 // type ProjectedPlane = 'xy' | 'xz' | 'yz'
 
-const projectedPlane2Ids /*: { [key in ProjectedPlane]: [number, number] }*/ = {
+const projectedPlane2Ids = {
   xy: [0, 1],
   xz: [0, 2],
   yz: [1, 2],
 }
 
 export function computeProjectedPlaneUVs(
-  positions /*: [number, number, number][]*/,
-  projectedPlane /*: ProjectedPlane*/ = 'xy'
-) /*: [number, number][]*/ {
+  positions,
+  projectedPlane = 'xy'
+) {
   const idxs = projectedPlane2Ids[projectedPlane]
-  const uvs /*: [number, number][]*/ = positions.map(() => {
+  const uvs = positions.map(() => {
     // Initialize to zero.
     return [0, 0]
   })

@@ -2,8 +2,6 @@ import {mat4, vec3, vec4} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.mod
 import {mesh} from './stanford-dragon.js'
 
 const kMaxNumLights = 9;
-const lightExtentMin = vec3.fromValues(-50, -30, -50);
-const lightExtentMax = vec3.fromValues(50, 50, 50);
 
 const shadowDepthTextureSize = 512;
 
@@ -44,32 +42,22 @@ class PointLight {
             Math.sin(t * this.ry) * deg2rad(15))
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
-        // const lightProjectionMatrix = mat4.create();
-        let lightProjectionMatrix
-        {
-            // const W = 80 / 2;
-            // const left = -W;
-            // const right = W;
-            // const bottom = -W;
-            // const top = W;
-            // const near = -200;
-            // const far = 400;  // 300;
-            // mat4.ortho(left, right, bottom, top, near, far, lightProjectionMatrix);
+        let lightProjectionMatrix = (() => {
             const aspect = 1.0
-            lightProjectionMatrix = mat4.perspective(
+            return mat4.perspective(
                 (2 * Math.PI) / 12,
                 aspect,
                 3,
                 400.0
             );
-        }
+        })();
 
         const lightViewProjMatrix = mat4.multiply(
             lightProjectionMatrix,
             mat4.multiply(panMatrix, lightViewMatrix))
 
         // The camera/light aren't moving, so write them into buffers now.
-        const lightMatrixData = lightViewProjMatrix /*as Float32Array*/;
+        const lightMatrixData = lightViewProjMatrix;
         device.queue.writeBuffer(
             sceneUniformBuffer,
             0 + offset,
@@ -78,7 +66,7 @@ class PointLight {
             lightMatrixData.byteLength
         );
 
-        const lightData = lightPosition /*as Float32Array*/;
+        const lightData = lightPosition;
         device.queue.writeBuffer(
             sceneUniformBuffer,
             64 + offset,
@@ -87,7 +75,7 @@ class PointLight {
             lightData.byteLength
         );
 
-        const lightColor = this.lightColor /*as Float32Array*/;
+        const lightColor = this.lightColor;
         device.queue.writeBuffer(
             sceneUniformBuffer,
             80 + offset,
@@ -98,14 +86,13 @@ class PointLight {
     }
 }
 
-const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
+const init = async ({ canvas /*, pageState, gui*/ }) => {
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
 
     // if (!pageState.active) return;
-    const context = canvas.getContext('webgpu') /*as GPUCanvasContext*/;
+    const context = canvas.getContext('webgpu');
 
-    let lightUpdate
     let vertexWriteGBuffers
     let fragmentWriteGBuffers
     let vertexTextureQuad
@@ -114,7 +101,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     let vertexShadow
 
     await Promise.all([
-        fetch('./lightUpdate.wgsl').then((r) => r.text()).then((r) => lightUpdate = r),
         fetch('./vertexWriteGBuffers.wgsl').then((r) => r.text()).then((r) => vertexWriteGBuffers = r),
         fetch('./fragmentWriteGBuffers.wgsl').then((r) => r.text()).then((r) => fragmentWriteGBuffers = r),
         fetch('./vertexTextureQuad.wgsl').then((r) => r.text()).then((r) => vertexTextureQuad = r),
@@ -185,7 +171,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
-    const vertexBuffers /*: Iterable<GPUVertexBufferLayout>*/ = [
+    const vertexBuffers = [
         {
             arrayStride: Float32Array.BYTES_PER_ELEMENT * 8,
             attributes: [
@@ -211,7 +197,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         },
     ];
 
-    const primitive /*: GPUPrimitiveState*/ = {
+    const primitive = {
         topology: 'triangle-list',
         cullMode: 'back',
     };
@@ -305,28 +291,14 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         entries: [
             {
                 binding: 0,
-                visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
-                buffer: {
-                    type: 'read-only-storage',
-                },
-            },
-            {
-                binding: 1,
-                visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
-                buffer: {
-                    type: 'uniform',
-                },
-            },
-            {
-                binding: 2,
                 visibility: GPUShaderStage.FRAGMENT,
                 buffer: {
                     type: 'uniform',
                 },
             },
             {
-                binding: 3,
-                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
                 buffer: {
                     type: 'uniform',
                 },
@@ -337,11 +309,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
         label: 'gBuffersDebugViewPipeline',
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [
-                gBufferTexturesBindGroupLayout,
-                lightsBufferBindGroupLayout,
-                uniformBufferBindGroupLayout,
-            ],
+            bindGroupLayouts: [gBufferTexturesBindGroupLayout],
         }),
         vertex: {
             module: device.createShaderModule({
@@ -411,7 +379,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         primitive,
     });
 
-    const textureQuadPassDescriptor /*: GPURenderPassDescriptor*/ = {
+    const textureQuadPassDescriptor = {
         colorAttachments: [
             {
                 // view is acquired and set in render loop.
@@ -571,7 +539,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         shadowDepthTexture.createView(),
     ];
 
-    const writeGBufferPassDescriptor /*: GPURenderPassDescriptor*/ = {
+    const writeGBufferPassDescriptor = {
         colorAttachments: [
             {
                 view: gBufferTextureViews[0],
@@ -625,57 +593,6 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         ],
     });
 
-    // Lights data are uploaded in a storage buffer
-    // which could be updated/culled/etc. with a compute shader
-    const extent = vec3.sub(lightExtentMax, lightExtentMin);
-    const lightDataStride = 8;
-    const bufferSizeInByte =
-        Float32Array.BYTES_PER_ELEMENT * lightDataStride * kMaxNumLights;
-    const lightsBuffer = device.createBuffer({
-        size: bufferSizeInByte,
-        usage: GPUBufferUsage.STORAGE,
-        mappedAtCreation: true,
-    });
-
-    // We randomaly populate lights randomly in a box range
-    // And simply move them along y-axis per frame to show they are
-    // dynamic lightings
-    const lightData = new Float32Array(lightsBuffer.getMappedRange());
-    const tmpVec4 = vec4.create();
-    let offset = 0;
-    for (let i = 0; i < kMaxNumLights; i++) {
-        offset = lightDataStride * i;
-        // position
-        for (let i = 0; i < 3; i++) {
-            tmpVec4[i] = Math.random() * extent[i] + lightExtentMin[i];
-        }
-        tmpVec4[3] = 1;
-        lightData.set(tmpVec4, offset);
-        // color
-        tmpVec4[0] = Math.random() * 2;
-        tmpVec4[1] = Math.random() * 2;
-        tmpVec4[2] = Math.random() * 2;
-        // radius
-        tmpVec4[3] = 20.0;
-        lightData.set(tmpVec4, offset + 4);
-    }
-    lightsBuffer.unmap();
-
-    const lightExtentBuffer = device.createBuffer({
-        size: 4 * 8,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    const lightExtentData = new Float32Array(8);
-    lightExtentData.set(lightExtentMin, 0);
-    lightExtentData.set(lightExtentMax, 4);
-    device.queue.writeBuffer(
-        lightExtentBuffer,
-        0,
-        lightExtentData.buffer,
-        lightExtentData.byteOffset,
-        lightExtentData.byteLength
-    );
-
     const lightsBufferBindGroup = device.createBindGroup({
         label: 'lightsBufferBindGroup',
         layout: lightsBufferBindGroupLayout,
@@ -683,25 +600,13 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             {
                 binding: 0,
                 resource: {
-                    buffer: lightsBuffer,
+                    buffer: configUniformBuffer,
                 },
             },
             {
                 binding: 1,
                 resource: {
-                    buffer: configUniformBuffer,
-                },
-            },
-            {
-                binding: 2,
-                resource: {
                     buffer: cameraUniformBuffer,
-                },
-            },
-            {
-                binding: 3,
-                resource: {
-                    buffer: sceneUniformBuffer,
                 },
             },
         ],
@@ -741,7 +646,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     // Move the model so it's centered.
     const modelMatrix = mat4.translation([0, -45, 0]);
 
-    const modelData = modelMatrix /*as Float32Array*/;
+    const modelData = modelMatrix;
     device.queue.writeBuffer(
         modelUniformBuffer,
         0,
@@ -751,7 +656,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
     );
     const invertTransposeModelMatrix = mat4.invert(modelMatrix);
     mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
-    const normalModelData = invertTransposeModelMatrix /*as Float32Array*/;
+    const normalModelData = invertTransposeModelMatrix;
     device.queue.writeBuffer(
         modelUniformBuffer,
         64,
@@ -769,7 +674,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
 
         mat4.multiply(projectionMatrix, viewMatrix, viewProjMatrix);
-        return viewProjMatrix /*as Float32Array*/;
+        return viewProjMatrix;
     }
 
     function frame() {
@@ -785,7 +690,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             cameraViewProj.byteOffset,
             cameraViewProj.byteLength
         );
-        const cameraInvViewProj = mat4.invert(cameraViewProj) /*as Float32Array*/;
+        const cameraInvViewProj = mat4.invert(cameraViewProj);
         device.queue.writeBuffer(
             cameraUniformBuffer,
             64,
@@ -795,7 +700,7 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
         );
 
         {
-            const modelData = modelMatrix /*as Float32Array*/;
+            const modelData = modelMatrix;
             device.queue.writeBuffer(
                 modelUniformBuffer,
                 0,
@@ -824,6 +729,18 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
             gBufferPass.end();
         }
         {
+            //シャドウマップの描画
+            for (let i = 0; i < settings.numLights; ++i) {
+                const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
+                shadowPass.setPipeline(shadowPipelines[i]);
+                shadowPass.setBindGroup(0, sceneBindGroupForShadow);
+                shadowPass.setBindGroup(1, modelBindGroup);
+                shadowPass.setVertexBuffer(0, vertexBuffer);
+                shadowPass.setIndexBuffer(indexBuffer, 'uint16');
+                shadowPass.drawIndexed(indexCount);
+                shadowPass.end();
+            }
+
             if (settings.mode === 'gBuffers view') {
                 // GBuffers debug view
                 // Left: depth
@@ -832,26 +749,12 @@ const init /*: SampleInit*/ = async ({ canvas /*, pageState, gui*/ }) => {
                 textureQuadPassDescriptor.colorAttachments[0].view = context
                     .getCurrentTexture()
                     .createView();
-                const debugViewPass = commandEncoder.beginRenderPass(
-                    textureQuadPassDescriptor
-                );
+                const debugViewPass = commandEncoder.beginRenderPass(textureQuadPassDescriptor);
                 debugViewPass.setPipeline(gBuffersDebugViewPipeline);
                 debugViewPass.setBindGroup(0, gBufferTexturesBindGroup);
                 debugViewPass.draw(6);
                 debugViewPass.end();
             } else {
-                //シャドウマップの描画
-                for (let i = 0; i < settings.numLights; ++i) {
-                    const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
-                    shadowPass.setPipeline(shadowPipelines[i]);
-                    shadowPass.setBindGroup(0, sceneBindGroupForShadow);
-                    shadowPass.setBindGroup(1, modelBindGroup);
-                    shadowPass.setVertexBuffer(0, vertexBuffer);
-                    shadowPass.setIndexBuffer(indexBuffer, 'uint16');
-                    shadowPass.drawIndexed(indexCount);
-                    shadowPass.end();
-                }
-
                 // Deferred rendering
                 const view = context.getCurrentTexture().createView();
                 textureQuadPassDescriptor.colorAttachments[0].view = view
