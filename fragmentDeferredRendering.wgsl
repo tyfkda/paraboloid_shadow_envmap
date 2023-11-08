@@ -1,4 +1,4 @@
-const kMaxNumLights = 9;
+const kMaxNumLights = 64;
 const SHADOW_Z_OFFSET = 0.001;  // 0.007;
 const PI = 3.14159265359;
 

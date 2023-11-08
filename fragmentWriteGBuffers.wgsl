@@ -11,8 +11,8 @@ fn main(
     @location(1) fragUV : vec2<f32>
 ) -> GBufferOutput {
     // faking some kind of checkerboard texture
-    let uv = floor(30.0 * fragUV);
-    let c = 0.2 + 0.5 * ((uv.x + uv.y) - 2.0 * floor((uv.x + uv.y) / 2.0));
+    let uv = floor(10.0 * fragUV);
+    let c = 0.5 + 0.5 * ((uv.x + uv.y) - 2.0 * floor((uv.x + uv.y) / 2.0));
 
     var output : GBufferOutput;
     output.normal = vec4(fragNormal, 1.0);

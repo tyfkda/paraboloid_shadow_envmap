@@ -1,4 +1,4 @@
-const kMaxNumLights = 9;
+const kMaxNumLights = 64;
 
 override lightIndex: u32 = 0;
 

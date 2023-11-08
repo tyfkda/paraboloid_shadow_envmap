@@ -23,7 +23,7 @@ fn main(
         );
         // remap depth into something a bit more visible
         let depth = (1.0 - rawDepth) * 50.0;
-        result = vec4(depth);
+        result = vec4(vec3(depth), 1);
     } else if (c.x < 0.75) {
         result = textureLoad(
             gBufferNormal,

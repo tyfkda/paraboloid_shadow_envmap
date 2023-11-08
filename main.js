@@ -2,7 +2,7 @@ import {mat4, vec3, vec4} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.mod
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh} from './stanford-dragon.js'
 
-const kMaxNumLights = 9;
+const kMaxNumLights = 64;
 
 const shadowDepthTextureSize = 512;
 
@@ -22,18 +22,28 @@ function posNegRand(min, max) {
     return flag * randomRange(min, max)
 }
 
+function shuffle(array) {
+    for (let i = 0; i < array.length - 1; ++i) {
+        const r = Math.floor(Math.random() * (array.length - i)) + i
+        const t = array[i]
+        array[i] = array[r]
+        array[r] = t
+    }
+    return array
+}
+
 class PointLight {
     constructor(lightColor) {
         const r = randomRange(100, 200)
         const t = randomRange(-Math.PI, Math.PI)
-        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 100 + Math.random() * 50, Math.cos(t) * r);
+        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 25 + Math.random() * 100, Math.cos(t) * r);
         this.lightColor = lightColor
 
         this.rx = posNegRand(deg2rad(60), deg2rad(90))
         this.ry = posNegRand(deg2rad(60), deg2rad(90))
     }
 
-    update(device, sceneUniformBuffer, index, t) {
+    update(device, sceneUniformBuffer, index, t, aspect) {
         const offset = (1 * 4 * 16 + 4 * 4 * 2) * index;
 
         const lightPosition = this.lightPosition
@@ -44,9 +54,8 @@ class PointLight {
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         let lightProjectionMatrix = (() => {
-            const aspect = 1.0
             return mat4.perspective(
-                (2 * Math.PI) / 12,
+                deg2rad(22.5),
                 aspect,
                 3,
                 400.0
@@ -394,9 +403,7 @@ const init = async ({ canvas, gui }) => {
 
     const settings = {
         mode: 'rendering',
-        // mode: 'gBuffers view',
-        numLights: 3,
-        // numLights: 8,
+        numLights: 6,
     };
     const configUniformBuffer = (() => {
         const buffer = device.createBuffer({
@@ -613,17 +620,14 @@ const init = async ({ canvas, gui }) => {
     });
 
 
-    const pointLights = []
-    const colors = [
+    const colors = shuffle([
         vec3.fromValues(1.0, 0.0, 0.0),
         vec3.fromValues(0.0, 1.0, 0.0),
         vec3.fromValues(0.0, 0.0, 1.0),
-    ]
-    for (let i = 0; i < kMaxNumLights; ++i) {
-        const intensity = 500000
-        const color = vec3.scale(colors[i % colors.length], intensity)
-        pointLights.push(new PointLight(color))
-    }
+    ])
+    const intensity = 200000
+    const pointLights = [...Array(kMaxNumLights)].map((_, i) =>
+        new PointLight(vec3.scale(colors[i % colors.length], intensity)))
 
 
 
@@ -711,7 +715,7 @@ const init = async ({ canvas, gui }) => {
 
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
-            pointLight.update(device, sceneUniformBuffer, i, t)
+            pointLight.update(device, sceneUniformBuffer, i, t, aspect)
         }
 
         const commandEncoder = device.createCommandEncoder();
