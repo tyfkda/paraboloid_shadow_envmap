@@ -96,10 +96,18 @@ class PointLight {
     }
 }
 
-const init = async ({ canvas, gui }) => {
-    const adapter = await navigator.gpu.requestAdapter();
-    const device = await adapter.requestDevice();
+async function isWebGpuSupported() {
+    let device = null
+    if (navigator.gpu) {
+        const adapter = await navigator.gpu.requestAdapter()
+        if (adapter) {
+            device = await adapter.requestDevice()
+        }
+    }
+    return device
+}
 
+const init = async ({ device, canvas, gui }) => {
     const context = canvas.getContext('webgpu');
 
     let vertexWriteGBuffers
@@ -777,12 +785,25 @@ const init = async ({ canvas, gui }) => {
     requestAnimationFrame(frame);
 };
 
+function notSupported() {
+    const div = document.getElementById('not-supported')
+    div.style.display = null  // デフォルト 'none' を削除して、表示する
+}
+
 async function main() {
-    const canvas = document.querySelector('canvas')
+    const device = await isWebGpuSupported()
+    if (!device) {
+        notSupported()
+        return
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.style.width = canvas.style.height = '100%'
+    document.body.appendChild(canvas)
 
     const gui = new dat.GUI();
 
-    await init({canvas, gui})
+    await init({device, canvas, gui})
 }
 
 await main()
