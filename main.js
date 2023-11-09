@@ -786,8 +786,20 @@ const init = async ({ device, canvas, gui }) => {
 };
 
 function notSupported() {
-    const div = document.getElementById('not-supported')
-    div.style.display = null  // デフォルト 'none' を削除して、表示する
+    const notSupported = document.getElementById('not-supported')
+    notSupported.style.display = null  // デフォルト 'none' を削除して、表示する
+}
+
+function getUrlQueries() {
+    const queryStr = window.location.search.slice(1)  // 文頭?を除外
+    const queries = {}
+    if (queryStr !== '') {
+        queryStr.split('&').forEach((queryStr) => {
+            var queryArr = queryStr.split('=')
+            queries[queryArr[0]] = queryArr[1]
+        })
+    }
+    return queries
 }
 
 async function main() {
@@ -797,13 +809,28 @@ async function main() {
         return
     }
 
-    const canvas = document.createElement('canvas')
-    canvas.style.width = canvas.style.height = '100%'
-    document.body.appendChild(canvas)
+    const run = async () => {
+        const canvas = document.createElement('canvas')
+        canvas.style.width = canvas.style.height = '100%'
+        document.body.appendChild(canvas)
 
-    const gui = new dat.GUI();
+        const gui = new dat.GUI();
 
-    await init({device, canvas, gui})
+        await init({device, canvas, gui})
+    }
+
+    // クエリ文字列で自動実行も可能にする
+    const queries = getUrlQueries()
+    if (queries.wait) {
+        const ready = document.getElementById('ready')
+        ready.style.display = null  // デフォルト 'none' を削除して、表示する
+        ready.addEventListener('click', async () => {
+            ready.style.display = 'none'  // 再度非表示に
+            await run()
+        })
+    } else {
+        await run()
+    }
 }
 
 await main()
