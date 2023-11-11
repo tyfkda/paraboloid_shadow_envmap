@@ -1,6 +1,7 @@
 const kMaxNumLights = 64;
 const SHADOW_Z_OFFSET = 0.001;  // 0.007;
 const PI = 3.14159265359;
+const GAMMA = 2.2;
 
 override shadowDepthTextureSize: f32 = 256.0;
 
@@ -42,6 +43,14 @@ struct FragmentInput {
     //@location(2) fragNorm : vec3<f32>,
 
     @builtin(position) coord : vec4<f32>,
+}
+
+fn tonemap(rgb: vec3<f32>) -> vec3<f32> {
+    return vec3(1.0) - exp(-rgb);
+}
+
+fn gamma(rgb: vec3<f32>) -> vec3<f32> {
+    return pow(rgb, vec3(1.0 / GAMMA));
 }
 
 @fragment
@@ -112,5 +121,5 @@ fn main(
         total += hasPixel * inSpotLight * lightingFactor * light.color.rgb * albedo;
     }
 
-    return vec4(total, 1.0);
+    return vec4(gamma(tonemap(total)), 1.0);
 }

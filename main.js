@@ -411,7 +411,7 @@ const init = async ({ device, canvas, gui }) => {
 
     const settings = {
         mode: 'rendering',
-        numLights: 6,
+        numLights: 9,
     };
     const configUniformBuffer = (() => {
         const buffer = device.createBuffer({
