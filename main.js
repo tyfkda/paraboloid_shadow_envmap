@@ -32,7 +32,7 @@ function shuffle(array) {
     return array
 }
 
-class PointLight {
+class SpotLight {
     constructor(lightColor) {
         const r = randomRange(100, 200)
         const t = randomRange(-Math.PI, Math.PI)
@@ -634,8 +634,8 @@ const init = async ({ device, canvas, gui }) => {
         vec3.fromValues(0.0, 0.0, 1.0),
     ])
     const intensity = 200000
-    const pointLights = [...Array(kMaxNumLights)].map((_, i) =>
-        new PointLight(vec3.scale(colors[i % colors.length], intensity)))
+    const spotLights = [...Array(kMaxNumLights)].map((_, i) =>
+        new SpotLight(vec3.scale(colors[i % colors.length], intensity)))
 
 
 
@@ -650,10 +650,6 @@ const init = async ({ device, canvas, gui }) => {
         1,
         2000.0
     );
-
-    const viewMatrix = mat4.inverse(mat4.lookAt(eyePosition, origin, upVector));
-
-    const viewProjMatrix = mat4.multiply(projectionMatrix, viewMatrix);
 
     // Move the model so it's centered.
     const modelMatrix = mat4.translation([0, -45, 0]);
@@ -684,9 +680,7 @@ const init = async ({ device, canvas, gui }) => {
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
-
-        mat4.multiply(projectionMatrix, viewMatrix, viewProjMatrix);
-        return viewProjMatrix;
+        return mat4.multiply(projectionMatrix, viewMatrix)
     }
 
     function frame() {
@@ -722,8 +716,8 @@ const init = async ({ device, canvas, gui }) => {
         }
 
         for (let i = 0; i < settings.numLights; ++i) {
-            const pointLight = pointLights[i]
-            pointLight.update(device, sceneUniformBuffer, i, t, aspect)
+            const spotLight = spotLights[i]
+            spotLight.update(device, sceneUniformBuffer, i, t, aspect)
         }
 
         const commandEncoder = device.createCommandEncoder();
