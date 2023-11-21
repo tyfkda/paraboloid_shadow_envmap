@@ -1,5 +1,5 @@
-const kMaxNumLights = 64;
-const SHADOW_Z_OFFSET = 0.015;
+const kMaxNumLights = 32;
+const SHADOW_Z_OFFSET = 0.01;
 const PI = 3.14159265359;
 const GAMMA = 2.2;
 
@@ -52,6 +52,8 @@ fn gamma(rgb: vec3<f32>) -> vec3<f32> {
     return pow(rgb, vec3(1.0 / GAMMA));
 }
 
+const kLightDirections = array(1.0, -1.0);
+
 @fragment
 fn main(
     input : FragmentInput
@@ -73,10 +75,12 @@ fn main(
 
         // XY is in (-1, 1) space, Z is in (0, 1) space
         let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
+        let zdir = select(1u, 0u, posFromLight0.z >= 0.0);  // 0=前、1=後ろ
 
         // 放物面変換
         let shadowZ = length(posFromLight0.xyz);
-        let posFromLightOrg = posFromLight0.xyz / shadowZ;
+        var posFromLightOrg = posFromLight0.xyz / shadowZ;
+        posFromLightOrg.z *= kLightDirections[zdir];  // 光源との向きによって前後を選択
         let posFromLightXY = posFromLightOrg.xy / (posFromLightOrg.z + 1.0);
 
         // Convert XY to (0, 1)
@@ -87,20 +91,18 @@ fn main(
         // to smooth the result.
         var visibility = 0.0;
         let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
+        let shadowmapIndex = lightIndex * 2 + zdir;
         for (var y = -1; y <= 1; y++) {
             for (var x = -1; x <= 1; x++) {
                 let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
                 visibility += textureSampleCompare(
                     shadowMap, shadowSampler,
-                    shadowPos.xy + offset, lightIndex,
+                    shadowPos.xy + offset, shadowmapIndex,
                     shadowZ - SHADOW_Z_OFFSET
                 );
             }
         }
         visibility /= 9.0;
-        if (posFromLightOrg.z < 0.0) {
-            visibility = 0.0;
-        }
 
         let diff = light.pos - position;
         let invlen = inverseSqrt(dot(diff, diff));

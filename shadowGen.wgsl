@@ -1,4 +1,6 @@
-const kMaxNumLights = 64;
+const kMaxNumLights = 32;
+
+override lightDirection: f32 = 1.0;
 
 struct Light {
     viewProjMatrix: mat4x4<f32>,
@@ -33,7 +35,8 @@ fn vertexMain(
 
     // 放物面変換
     let shadowZ = length(pos.xyz);
-    let d = pos.xyz / shadowZ;
+    var d = pos.xyz / shadowZ;
+    d.z *= lightDirection;
     let dd = d.xy / (d.z + 1.0);
 
     var output : VertexOutput;

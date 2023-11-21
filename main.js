@@ -2,8 +2,8 @@ import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh} from './stanford-dragon.js'
 
-const kMaxNumLights = 64;
-const kMaxShadowPasses = kMaxNumLights * 1;  // 点光源用、ひとまず半球で１枚のみ
+const kMaxNumLights = 32;
+const kMaxShadowPasses = kMaxNumLights * 2;  // 点光源用、双放物面で２倍必要
 
 const shadowDepthTextureSize = 1024;
 
@@ -35,19 +35,18 @@ function shuffle(array) {
 
 class PointLight {
     constructor(lightColor) {
-        const r = randomRange(50, 100)
-        const t = randomRange(-Math.PI, Math.PI)
-        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 25 + Math.random() * 50, Math.cos(t) * r);
         this.lightColor = lightColor
 
-        // this.rx = posNegRand(deg2rad(60), deg2rad(90))
-        // this.ry = posNegRand(deg2rad(60), deg2rad(90))
+        this.r = randomRange(30, 180)
+        this.tx = posNegRand(deg2rad(10), deg2rad(40))
+        this.ty = posNegRand(deg2rad(10), deg2rad(40))
+        this.tz = posNegRand(deg2rad(10), deg2rad(40))
     }
 
     update(device, lightStorageBuffer, index, t) {
         const offset = 16 + (1 * 4 * 16 + 4 * 4 * 2) * index;
 
-        const lightPosition = this.lightPosition
+        const lightPosition = vec3.fromValues(Math.sin(this.tx * t) * this.r, 50 + 40 * Math.sin(this.ty * t), Math.cos(this.tz * t) * this.r);
 
         // const panMatrix = mat4.rotateY(
         //     mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
@@ -55,7 +54,7 @@ class PointLight {
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         let lightProjectionMatrix = (() => {
-            const far = 400
+            const far = 400 * 2
             const invfar = 1.0 / far
             return mat4.create(
                 invfar, 0.0,  0.0, 0.0,
@@ -470,7 +469,7 @@ const init = async ({ device, canvas, gui }) => {
         format: 'depth32float',
     });
 
-    const shadowPipeline = device.createRenderPipeline({
+    const shadowPipelines = [...Array(2)].map((_, i) => device.createRenderPipeline({
         layout: device.createPipelineLayout({
             bindGroupLayouts: [
                 lightStorageBufferBindGroupLayout,
@@ -484,6 +483,9 @@ const init = async ({ device, canvas, gui }) => {
             }),
             entryPoint: 'vertexMain',
             buffers: vertexBuffers,
+            constants: {
+                lightDirection: 1.0 - i * 2,  // 方向：1.0 or -1.0
+            },
         },
         fragment: {
             module: device.createShaderModule({
@@ -491,7 +493,6 @@ const init = async ({ device, canvas, gui }) => {
             }),
             entryPoint: 'fragmentMain',
             constants: {
-                // lightIndex: i,
             },
             targets: [],
         },
@@ -500,8 +501,12 @@ const init = async ({ device, canvas, gui }) => {
             depthCompare: 'less',
             format: 'depth32float',
         },
-        primitive,
-    })
+        // primitive,
+        primitive: {
+            topology: 'triangle-list',
+            cullMode: 'none',  // これにしてみる
+        },
+    }))
 
     const shadowPassDescriptors = [...Array(kMaxShadowPasses)].map((_, i) => {
         return {
@@ -638,8 +643,11 @@ const init = async ({ device, canvas, gui }) => {
         vec3.fromValues(0.0, 0.0, 1.0),
     ])
     const intensity = 10000
-    const pointLights = [...Array(kMaxNumLights)].map((_, i) =>
-        new PointLight(vec3.scale(colors[i % colors.length], intensity)))
+    const pointLights = [...Array(kMaxNumLights)].map((_, i) => {
+        const color = i === 0 ? vec3.scale([1.0, 1.0, 1.0], intensity * 4)
+                              : vec3.scale(colors[i % colors.length], intensity)
+        return new PointLight(color)
+    })
 
 
 
@@ -669,8 +677,9 @@ const init = async ({ device, canvas, gui }) => {
 
     // Rotates the camera around the origin based on time.
     function getCameraViewProjMatrix(t) {
-        const rad = t * (Math.PI / 10);
-        const rotation = mat4.rotateY(mat4.translation(origin), rad);
+        const rad = t * (Math.PI / 20);
+        const radX = Math.sin(t * (Math.PI / 13)) * (Math.PI / 8);
+        const rotation = mat4.rotateX(mat4.rotateY(mat4.translation(origin), rad), radX);
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
@@ -716,13 +725,13 @@ const init = async ({ device, canvas, gui }) => {
 
         const commandEncoder = device.createCommandEncoder();
         {
-            // 各光源からのシャドウマップを作成
-            for (let i = 0; i < settings.numLights; ++i) {
+            // 各光源からのシャドウマップを作成（光源ごとに前後２枚）
+            for (let i = 0; i < settings.numLights * 2; ++i) {
                 const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
-                shadowPass.setPipeline(shadowPipeline);
+                shadowPass.setPipeline(shadowPipelines[i & 1]);
                 shadowPass.setBindGroup(0, lightStorageBindGroup);
                 shadowPass.setBindGroup(1, modelUniformBindGroup);
-                shadowPass.setBindGroup(2, shadowUniformBindGroups[i])
+                shadowPass.setBindGroup(2, shadowUniformBindGroups[i >> 1])
                 shadowPass.setVertexBuffer(0, vertexBuffer);
                 shadowPass.setIndexBuffer(indexBuffer, 'uint16');
                 shadowPass.drawIndexed(indexCount);
