@@ -1,9 +1,9 @@
 const kMaxNumLights = 64;
-const SHADOW_Z_OFFSET = 0.001;  // 0.007;
+const SHADOW_Z_OFFSET = 0.015;
 const PI = 3.14159265359;
 const GAMMA = 2.2;
 
-override shadowDepthTextureSize: f32 = 256.0;
+override shadowDepthTextureSize: f32 = 1024.0;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
@@ -73,15 +73,15 @@ fn main(
 
         // XY is in (-1, 1) space, Z is in (0, 1) space
         let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
-        let posFromLight = posFromLight0.xyz / posFromLight0.w;
-        let inSpotLight = select(0.0, 1.0, dot(posFromLight.xy, posFromLight.xy) < 1);
+
+        // 放物面変換
+        let shadowZ = length(posFromLight0.xyz);
+        let posFromLightOrg = posFromLight0.xyz / shadowZ;
+        let posFromLightXY = posFromLightOrg.xy / (posFromLightOrg.z + 1.0);
 
         // Convert XY to (0, 1)
         // Y is flipped because texture coords are Y-down.
-        var shadowPos = vec3(
-            posFromLight.xy * vec2(0.5, -0.5) + vec2(0.5),
-            posFromLight.z
-        );
+        var shadowPos = posFromLightXY * vec2(0.5, -0.5) + vec2(0.5);
 
         // Percentage-closer filtering. Sample texels in the region
         // to smooth the result.
@@ -93,11 +93,14 @@ fn main(
                 visibility += textureSampleCompare(
                     shadowMap, shadowSampler,
                     shadowPos.xy + offset, lightIndex,
-                    shadowPos.z - SHADOW_Z_OFFSET
+                    shadowZ - SHADOW_Z_OFFSET
                 );
             }
         }
         visibility /= 9.0;
+        if (posFromLightOrg.z < 0.0) {
+            visibility = 0.0;
+        }
 
         let diff = light.pos - position;
         let invlen = inverseSqrt(dot(diff, diff));
@@ -111,7 +114,7 @@ fn main(
             0
         ).rgb;
 
-        total += inSpotLight * lightingFactor * light.color.rgb * albedo;
+        total += lightingFactor * light.color.rgb * albedo;
     }
 
     return vec4(gamma(tonemap(total)), 1.0);

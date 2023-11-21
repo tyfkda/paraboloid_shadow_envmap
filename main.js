@@ -3,8 +3,9 @@ import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.m
 import {mesh} from './stanford-dragon.js'
 
 const kMaxNumLights = 64;
+const kMaxShadowPasses = kMaxNumLights * 1;  // 点光源用、ひとまず半球で１枚のみ
 
-const shadowDepthTextureSize = 512;
+const shadowDepthTextureSize = 1024;
 
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
@@ -32,39 +33,38 @@ function shuffle(array) {
     return array
 }
 
-class SpotLight {
+class PointLight {
     constructor(lightColor) {
-        const r = randomRange(100, 200)
+        const r = randomRange(50, 100)
         const t = randomRange(-Math.PI, Math.PI)
-        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 25 + Math.random() * 100, Math.cos(t) * r);
+        this.lightPosition = vec3.fromValues(Math.sin(t) * r, 25 + Math.random() * 50, Math.cos(t) * r);
         this.lightColor = lightColor
 
-        this.rx = posNegRand(deg2rad(60), deg2rad(90))
-        this.ry = posNegRand(deg2rad(60), deg2rad(90))
+        // this.rx = posNegRand(deg2rad(60), deg2rad(90))
+        // this.ry = posNegRand(deg2rad(60), deg2rad(90))
     }
 
-    update(device, lightStorageBuffer, index, t, aspect) {
+    update(device, lightStorageBuffer, index, t) {
         const offset = 16 + (1 * 4 * 16 + 4 * 4 * 2) * index;
 
         const lightPosition = this.lightPosition
 
-        const panMatrix = mat4.rotateY(
-            mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
-            Math.sin(t * this.ry) * deg2rad(15))
+        // const panMatrix = mat4.rotateY(
+        //     mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
+        //     Math.sin(t * this.ry) * deg2rad(15))
 
         const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
         let lightProjectionMatrix = (() => {
-            return mat4.perspective(
-                deg2rad(22.5),
-                aspect,
-                3,
-                400.0
-            );
+            const far = 400
+            const invfar = 1.0 / far
+            return mat4.create(
+                invfar, 0.0,  0.0, 0.0,
+                0.0, invfar,  0.0, 0.0,
+                0.0, 0.0, -invfar, 0.0,
+                0.0, 0.0,  0.0, 1.0)
         })();
 
-        const lightViewProjMatrix = mat4.multiply(
-            lightProjectionMatrix,
-            mat4.multiply(panMatrix, lightViewMatrix))
+        const lightViewProjMatrix = mat4.multiply(lightProjectionMatrix, lightViewMatrix)
 
         // The camera/light aren't moving, so write them into buffers now.
         const lightMatrixData = lightViewProjMatrix;
@@ -115,7 +115,7 @@ const init = async ({ device, canvas, gui }) => {
     let vertexTextureQuad
     let fragmentGBuffersDebugView
     let fragmentDeferredRendering
-    let vertexShadow
+    let shadowGenShader
 
     await Promise.all([
         fetch('./vertexWriteGBuffers.wgsl').then((r) => r.text()).then((r) => vertexWriteGBuffers = r),
@@ -123,7 +123,7 @@ const init = async ({ device, canvas, gui }) => {
         fetch('./vertexTextureQuad.wgsl').then((r) => r.text()).then((r) => vertexTextureQuad = r),
         fetch('./fragmentGBuffersDebugView.wgsl').then((r) => r.text()).then((r) => fragmentGBuffersDebugView = r),
         fetch('./fragmentDeferredRendering.wgsl').then((r) => r.text()).then((r) => fragmentDeferredRendering = r),
-        fetch('./vertexShadow.wgsl').then((r) => r.text()).then((r) => vertexShadow = r),
+        fetch('./shadowGen.wgsl').then((r) => r.text()).then((r) => shadowGenShader = r),
     ])
 
     const devicePixelRatio = window.devicePixelRatio || 1;
@@ -412,7 +412,7 @@ const init = async ({ device, canvas, gui }) => {
 
     const settings = {
         mode: 'rendering',
-        numLights: 9,
+        numLights: 1,
     };
 
     gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
@@ -465,7 +465,7 @@ const init = async ({ device, canvas, gui }) => {
 
     // Create the depth texture for rendering/sampling the shadow map.
     const shadowDepthTexture = device.createTexture({
-        size: [shadowDepthTextureSize, shadowDepthTextureSize, kMaxNumLights],
+        size: [shadowDepthTextureSize, shadowDepthTextureSize, kMaxShadowPasses],
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         format: 'depth32float',
     });
@@ -480,10 +480,20 @@ const init = async ({ device, canvas, gui }) => {
         }),
         vertex: {
             module: device.createShaderModule({
-                code: vertexShadow,
+                code: shadowGenShader,
             }),
-            entryPoint: 'main',
+            entryPoint: 'vertexMain',
             buffers: vertexBuffers,
+        },
+        fragment: {
+            module: device.createShaderModule({
+                code: shadowGenShader,
+            }),
+            entryPoint: 'fragmentMain',
+            constants: {
+                // lightIndex: i,
+            },
+            targets: [],
         },
         depthStencil: {
             depthWriteEnabled: true,
@@ -493,7 +503,7 @@ const init = async ({ device, canvas, gui }) => {
         primitive,
     })
 
-    const shadowPassDescriptors = [...Array(kMaxNumLights)].map((_, i) => {
+    const shadowPassDescriptors = [...Array(kMaxShadowPasses)].map((_, i) => {
         return {
             colorAttachments: [],
             depthStencilAttachment: {
@@ -627,9 +637,9 @@ const init = async ({ device, canvas, gui }) => {
         vec3.fromValues(0.0, 1.0, 0.0),
         vec3.fromValues(0.0, 0.0, 1.0),
     ])
-    const intensity = 200000
-    const spotLights = [...Array(kMaxNumLights)].map((_, i) =>
-        new SpotLight(vec3.scale(colors[i % colors.length], intensity)))
+    const intensity = 10000
+    const pointLights = [...Array(kMaxNumLights)].map((_, i) =>
+        new PointLight(vec3.scale(colors[i % colors.length], intensity)))
 
 
 
@@ -700,8 +710,8 @@ const init = async ({ device, canvas, gui }) => {
         }
 
         for (let i = 0; i < settings.numLights; ++i) {
-            const spotLight = spotLights[i]
-            spotLight.update(device, lightStorageBuffer, i, t, aspect)
+            const pointLight = pointLights[i]
+            pointLight.update(device, lightStorageBuffer, i, t)
         }
 
         const commandEncoder = device.createCommandEncoder();

@@ -69,3 +69,32 @@ export function computeProjectedPlaneUVs(
   })
   return uvs
 }
+
+export function addRect(mesh, basePos, vec1, vec2, normal, div) {
+    const baseIndex = mesh.positions.length
+    const nv = div + 1
+    // Triangle
+    for (let i = 0; i < div; ++i) {
+        for (let j = 0; j < div; ++j) {
+            let k = baseIndex + (i * nv + j)
+            mesh.triangles.push(
+                [k + 0, k + nv, k + 1],
+                [k + 1, k + nv, k + nv + 1],
+            )
+        }
+    }
+
+    // Position, normal, uv
+    for (let i = 0; i < nv; ++i) {
+        const pi = i / div
+        for (let j = 0; j < nv; ++j) {
+            const pj = j / div
+            mesh.positions.push([
+                basePos[0] + vec1[0] * pj + vec2[0] * pi,
+                basePos[1] + vec1[1] * pj + vec2[1] * pi,
+                basePos[2] + vec1[2] * pj + vec2[2] * pi])
+            mesh.normals.push(normal)
+            mesh.uvs.push([pj, pi])
+        }
+    }
+}
