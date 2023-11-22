@@ -4,6 +4,7 @@ const PI = 3.14159265359;
 const GAMMA = 2.2;
 
 override shadowDepthTextureSize: f32 = 1024.0;
+override paraboloid: bool = false;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
@@ -30,6 +31,8 @@ struct LightInfo {
 @group(2) @binding(0) var<storage, read> light_info : LightInfo;
 
 fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
+    // TODO: paraboloid の場合の逆算
+
     // reconstruct world-space position from the screen coordinate.
     let posClip = vec4(coord.x * 2.0 - 1.0, (1.0 - coord.y) * 2.0 - 1.0, depth_sample, 1.0);
     let posWorldW = camera.invViewProjectionMatrix * posClip;
@@ -104,6 +107,7 @@ fn main(
             }
         }
         visibility /= 9.0;
+if (paraboloid) { visibility = 1.0; }
 
         let diff = light.pos - position;
         let invlen = inverseSqrt(dot(diff, diff));
@@ -125,5 +129,8 @@ fn main(
         total += lightingFactor * light.color.rgb * (lambertFactor * albedo + specularFactor);
     }
 
-    return vec4(gamma(tonemap(total)), 1.0);
+    if (!paraboloid) {
+        total = gamma(tonemap(total));
+    }
+    return vec4(total, 1.0);
 }

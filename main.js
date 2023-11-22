@@ -8,6 +8,7 @@ const kMaxNumLights = 32;
 const kMaxShadowPasses = kMaxNumLights * 2;  // 点光源用、双放物面で２倍必要
 
 const shadowDepthTextureSize = 1024;
+const envmapTextureSize = 1024;
 
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
@@ -343,10 +344,48 @@ const init = async ({ device, canvas, gui }) => {
         ],
     });
 
+    const debugTexturesBindGroupLayout = device.createBindGroupLayout({
+        label: 'debugTexturesBindGroupLayout',
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'unfilterable-float',
+                    viewDimension: '2d-array',
+                },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'unfilterable-float',
+                },
+            },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'unfilterable-float',
+                },
+            },
+            {
+                binding: 3,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'depth',
+                },
+            },
+        ],
+    });
+
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
         label: 'gBuffersDebugViewPipeline',
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [gBufferTexturesBindGroupLayout],
+            bindGroupLayouts: [
+                gBufferTexturesBindGroupLayout,
+                debugTexturesBindGroupLayout,
+            ],
         }),
         vertex: {
             module: device.createShaderModule({
@@ -699,6 +738,191 @@ const init = async ({ device, canvas, gui }) => {
 
     // ^^^ unlit関連 ^^^
 
+    // VVV 環境マップ関連 VVV
+
+    const envmapGBufferTextureNormal = device.createTexture({
+        size: [envmapTextureSize, envmapTextureSize],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        format: 'rgba16float',
+    });
+    const envmapGBufferTextureAlbedo = device.createTexture({
+        size: [envmapTextureSize, envmapTextureSize],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        format: 'bgra8unorm',
+    });
+    const envmapDepthTexture = device.createTexture({
+        size: [envmapTextureSize, envmapTextureSize],
+        format: 'depth24plus',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    const kEnvmapTextureFormat = 'rgba16float'
+    const envmapTexture = device.createTexture({
+        size: [envmapTextureSize, envmapTextureSize, 2],
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        format: kEnvmapTextureFormat,
+    });
+    const envmapTextureViews = [...Array(2)].map((_, i) => envmapTexture.createView({arrayLayerCount: 1, baseArrayLayer: i}))
+
+    const writeEnvmapGBufferPassDescriptor = {
+        colorAttachments: [
+            {
+                view: envmapGBufferTextureNormal.createView(),
+                clearValue: { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+            {
+                view: envmapGBufferTextureAlbedo.createView(),
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                loadOp: 'clear',
+                storeOp: 'store',
+            },
+        ],
+        depthStencilAttachment: {
+            view: envmapDepthTexture.createView(),
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+        },
+    }
+
+    const writeEnvmapGBuffersPipelines = [...Array(2)].map((_, i) => device.createRenderPipeline({
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [
+                    cameraUniformBufferBindGroupLayout,
+                    modelUniformBufferBindGroupLayout,
+                ],
+            }),
+            vertex: {
+                module: device.createShaderModule({
+                    code: vertexWriteGBuffers,
+                }),
+                entryPoint: 'main',
+                buffers: vertexBuffers,
+                constants: {
+                    paraboloid: true,
+                    viewDirection: 1.0 - i * 2,
+                },
+            },
+            fragment: {
+                module: device.createShaderModule({
+                    code: fragmentWriteGBuffers,
+                }),
+                entryPoint: 'main',
+                targets: [
+                    // normal
+                    { format: 'rgba16float' },
+                    // albedo
+                    { format: 'bgra8unorm' },
+                ],
+                constants: {
+                    paraboloid: true,
+                },
+            },
+            depthStencil: {
+                depthWriteEnabled: true,
+                depthCompare: 'less',
+                format: 'depth24plus',
+            },
+            primitive: {
+                topology: 'triangle-list',
+                cullMode: ['back', 'front'][i],
+            },
+        }))
+
+    const envmapCameraUniformBuffer = device.createBuffer({
+        size: 4 * 16 * 2 + 4 * 4, // two 4x4 matrix + one vec3
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const envmapCameraUniformBindGroup = device.createBindGroup({
+        layout: writeGBuffersPipeline.getBindGroupLayout(0),
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: envmapCameraUniformBuffer,
+                },
+            },
+        ],
+    });
+
+    const envmapDeferredRenderPipeline = device.createRenderPipeline({
+        label: 'envmapDeferredRenderPipeline',
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [
+                gBufferTexturesBindGroupLayout,
+                cameraUniformBufferBindGroupLayout,
+                lightStorageBufferBindGroupLayout,
+            ],
+        }),
+        vertex: {
+            module: device.createShaderModule({
+                code: vertexTextureQuad,
+            }),
+            entryPoint: 'main',
+        },
+        fragment: {
+            module: device.createShaderModule({
+                code: fragmentDeferredRendering,
+            }),
+            entryPoint: 'main',
+            targets: [
+                {
+                    format: kEnvmapTextureFormat,
+                },
+            ],
+            constants: {
+                shadowDepthTextureSize: envmapTextureSize,
+                paraboloid: true,
+            },
+        },
+        primitive,
+    });
+
+    const envmapCameraBufferBindGroup = device.createBindGroup({
+        label: 'envmapCameraBufferBindGroup',
+        layout: cameraUniformBufferBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: envmapCameraUniformBuffer,
+                },
+            },
+        ],
+    });
+
+    const envmapGBufferTexturesBindGroup = device.createBindGroup({
+        layout: gBufferTexturesBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: envmapGBufferTextureNormal.createView(),
+            },
+            {
+                binding: 1,
+                resource: envmapGBufferTextureAlbedo.createView(),
+            },
+            {
+                binding: 2,
+                resource: envmapDepthTexture.createView(),
+            },
+            {
+                binding: 3,
+                resource: shadowDepthTexture.createView(),  //gBufferTextureViews[3],
+            },
+            {
+                binding: 4,
+                resource: device.createSampler({
+                    compare: 'less',
+                })
+            },
+        ],
+    });
+
+    // ^^^ 環境マップ関連 ^^^
+
     const gBufferTextureViews = [
         gBufferTextureNormal.createView(),
         gBufferTextureAlbedo.createView(),
@@ -760,6 +984,27 @@ const init = async ({ device, canvas, gui }) => {
         ],
     });
 
+    const debugTexturesBindGroup = device.createBindGroup({
+        layout: debugTexturesBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: envmapTexture.createView(),
+            },
+            {
+                binding: 1,
+                resource: envmapGBufferTextureNormal.createView(),
+            },
+            {
+                binding: 2,
+                resource: envmapGBufferTextureAlbedo.createView(),
+            },
+            {
+                binding: 3,
+                resource: envmapDepthTexture.createView(),
+            },
+        ],
+    });
 
     const colors = shuffle([
         vec3.fromValues(1.0, 0.0, 0.0),
@@ -800,7 +1045,7 @@ const init = async ({ device, canvas, gui }) => {
     );
 
     // Rotates the camera around the origin based on time.
-    function getCameraViewProjMatrix(t) {
+    function getCameraViewMatrix(t) {
         const rad = t * (Math.PI / 20);
         const radX = Math.sin(t * (Math.PI / 13)) * (Math.PI / 8);
         const rotation = mat4.rotateX(mat4.rotateY(mat4.translation(origin), rad), radX);
@@ -808,7 +1053,7 @@ const init = async ({ device, canvas, gui }) => {
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
         return {
-            matrix: mat4.multiply(projectionMatrix, viewMatrix),
+            viewMatrix: viewMatrix,
             position: rotatedEyePosition,
         };
     }
@@ -818,29 +1063,73 @@ const init = async ({ device, canvas, gui }) => {
 
         const t = Date.now() * (1 / 1000);
         {
-            const {matrix, position} = getCameraViewProjMatrix(t);
-            device.queue.writeBuffer(
-                cameraUniformBuffer,
-                0,
-                matrix.buffer,
-                matrix.byteOffset,
-                matrix.byteLength
-            );
-            const cameraInvViewProj = mat4.invert(matrix);
-            device.queue.writeBuffer(
-                cameraUniformBuffer,
-                4 * 16,
-                cameraInvViewProj.buffer,
-                cameraInvViewProj.byteOffset,
-                cameraInvViewProj.byteLength
-            );
-            device.queue.writeBuffer(
-                cameraUniformBuffer,
-                4 * 16 * 2,
-                position.buffer,
-                position.byteOffset,
-                position.byteLength
-            );
+            const {viewMatrix, position} = getCameraViewMatrix(t);
+            {
+                const cameraViewProj = mat4.multiply(projectionMatrix, viewMatrix)
+                device.queue.writeBuffer(
+                    cameraUniformBuffer,
+                    0,
+                    cameraViewProj.buffer,
+                    cameraViewProj.byteOffset,
+                    cameraViewProj.byteLength
+                );
+                const cameraInvViewProj = mat4.invert(cameraViewProj);
+                device.queue.writeBuffer(
+                    cameraUniformBuffer,
+                    4 * 16,
+                    cameraInvViewProj.buffer,
+                    cameraInvViewProj.byteOffset,
+                    cameraInvViewProj.byteLength
+                );
+                device.queue.writeBuffer(
+                    cameraUniformBuffer,
+                    4 * 16 * 2,
+                    position.buffer,
+                    position.byteOffset,
+                    position.byteLength
+                );
+            }
+
+            // 環境マップ作成用のカメラにも設定（プロジェクション変換はなし）
+            {
+                const envmapViewMatrix = mat4.clone(viewMatrix)
+                envmapViewMatrix[12] = envmapViewMatrix[14] = 0.0  // 位置を原点付近に
+                envmapViewMatrix[13] = -20;
+
+                let envmapProjectionMatrix = (() => {
+                    const far = 400 * 2
+                    const invfar = 1.0 / far
+                    return mat4.create(
+                        invfar, 0.0,  0.0, 0.0,
+                        0.0, invfar,  0.0, 0.0,
+                        0.0, 0.0, -invfar, 0.0,
+                        0.0, 0.0,  0.0, 1.0)
+                })();
+
+                const envmapViewProj = mat4.multiply(envmapProjectionMatrix, envmapViewMatrix)
+                device.queue.writeBuffer(
+                    envmapCameraUniformBuffer,
+                    0,
+                    envmapViewProj.buffer,
+                    envmapViewProj.byteOffset,
+                    envmapViewProj.byteLength
+                );
+                const envmapInvViewProj = mat4.invert(envmapViewProj);
+                device.queue.writeBuffer(
+                    envmapCameraUniformBuffer,
+                    4 * 16,
+                    envmapInvViewProj.buffer,
+                    envmapInvViewProj.byteOffset,
+                    envmapInvViewProj.byteLength
+                );
+                device.queue.writeBuffer(
+                    envmapCameraUniformBuffer,
+                    4 * 16 * 2,
+                    position.buffer,
+                    position.byteOffset,
+                    position.byteLength
+                );
+            }
         }
 
         {
@@ -877,6 +1166,34 @@ const init = async ({ device, canvas, gui }) => {
             }
         }
         {
+            for (let i = 0; i < 2; ++i) {
+                // 環境マップ用Gバッファ構築
+                const envmapGBufferPass = commandEncoder.beginRenderPass(writeEnvmapGBufferPassDescriptor);
+                envmapGBufferPass.setPipeline(writeEnvmapGBuffersPipelines[i]);
+                envmapGBufferPass.setBindGroup(0, envmapCameraUniformBindGroup);
+                envmapGBufferPass.setBindGroup(1, modelUniformBindGroup);
+                for (const go of sceneGameObjects) {
+                    if (go === dragonObject)
+                        continue
+                    envmapGBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
+                    envmapGBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
+                    envmapGBufferPass.drawIndexed(go.mesh.indexCount);
+                }
+                envmapGBufferPass.end();
+
+                // 環境マップ半球作成
+                // （シャドウマップも使用する）
+                textureQuadPassDescriptor.colorAttachments[0].view = envmapTextureViews[i]
+                const envmapDeferredRenderingPass = commandEncoder.beginRenderPass(textureQuadPassDescriptor)
+                envmapDeferredRenderingPass.setPipeline(envmapDeferredRenderPipeline);
+                envmapDeferredRenderingPass.setBindGroup(0, envmapGBufferTexturesBindGroup);
+                envmapDeferredRenderingPass.setBindGroup(1, envmapCameraBufferBindGroup);
+                envmapDeferredRenderingPass.setBindGroup(2, lightStorageBindGroup);
+                envmapDeferredRenderingPass.draw(6);
+                envmapDeferredRenderingPass.end();
+            }
+        }
+        {
             const gBufferPass = commandEncoder.beginRenderPass(writeGBufferPassDescriptor);
             gBufferPass.setPipeline(writeGBuffersPipeline);
             gBufferPass.setBindGroup(0, cameraUniformBindGroup);
@@ -901,6 +1218,7 @@ const init = async ({ device, canvas, gui }) => {
                 const debugViewPass = commandEncoder.beginRenderPass(textureQuadPassDescriptor);
                 debugViewPass.setPipeline(gBuffersDebugViewPipeline);
                 debugViewPass.setBindGroup(0, gBufferTexturesBindGroup);
+                debugViewPass.setBindGroup(1, debugTexturesBindGroup);
                 debugViewPass.draw(6);
                 debugViewPass.end();
             } else {
