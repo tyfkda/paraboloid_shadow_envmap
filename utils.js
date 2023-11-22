@@ -98,3 +98,47 @@ export function addRect(mesh, basePos, vec1, vec2, normal, div) {
         }
     }
 }
+
+export function createSphere(radius, widthSegments, heightSegments) {
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    const triangles = [];
+
+    for (let i = 0; i <= heightSegments; i++) {
+        const theta = i * Math.PI / heightSegments;
+        const sinTheta = Math.sin(theta);
+        const cosTheta = Math.cos(theta);
+
+        for (let j = 0; j <= widthSegments; j++) {
+            const phi = j * 2 * Math.PI / widthSegments;
+            const sinPhi = Math.sin(phi);
+            const cosPhi = Math.cos(phi);
+
+            const x = cosPhi * sinTheta;
+            const y = cosTheta;
+            const z = sinPhi * sinTheta;
+
+            positions.push([radius * x, radius * y, radius * z]);
+            normals.push([x, y, z]);
+            uvs.push([j / widthSegments, i / heightSegments]);
+        }
+    }
+
+    for (let i = 0; i < heightSegments; i++) {
+        for (let j = 0; j < widthSegments; j++) {
+            const first = (i * (widthSegments + 1)) + j;
+            const second = first + widthSegments + 1;
+
+            triangles.push([first, first + 1, second]);
+            triangles.push([second, first + 1, second + 1]);
+        }
+    }
+
+    return {
+        positions,
+        normals,
+        uvs,
+        triangles,
+    };
+}

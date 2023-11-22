@@ -1,6 +1,7 @@
 import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh} from './stanford-dragon.js'
+import {createSphere} from './utils.js'
 
 const kMaxNumLights = 32;
 const kMaxShadowPasses = kMaxNumLights * 2;  // 点光源用、双放物面で２倍必要
@@ -38,15 +39,17 @@ class PointLight {
         this.lightColor = lightColor
 
         this.r = randomRange(30, 180)
+        this.ry = randomRange(10, 40)
         this.tx = posNegRand(deg2rad(10), deg2rad(40))
         this.ty = posNegRand(deg2rad(10), deg2rad(40))
         this.tz = posNegRand(deg2rad(10), deg2rad(40))
+        this.position = vec3.create()
     }
 
     update(device, lightStorageBuffer, index, t) {
         const offset = 16 + (1 * 4 * 16 + 4 * 4 * 2) * index;
 
-        const lightPosition = vec3.fromValues(Math.sin(this.tx * t) * this.r, 50 + 40 * Math.sin(this.ty * t), Math.cos(this.tz * t) * this.r);
+        const lightPosition = vec3.set(Math.sin(this.tx * t) * this.r, 35 + this.ry * Math.sin(this.ty * t), Math.cos(this.tz * t) * this.r, this.position);
 
         // const panMatrix = mat4.rotateY(
         //     mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
@@ -115,6 +118,7 @@ const init = async ({ device, canvas, gui }) => {
     let fragmentGBuffersDebugView
     let fragmentDeferredRendering
     let shadowGenShader
+    let unlitShader
 
     await Promise.all([
         fetch('./vertexWriteGBuffers.wgsl').then((r) => r.text()).then((r) => vertexWriteGBuffers = r),
@@ -123,6 +127,7 @@ const init = async ({ device, canvas, gui }) => {
         fetch('./fragmentGBuffersDebugView.wgsl').then((r) => r.text()).then((r) => fragmentGBuffersDebugView = r),
         fetch('./fragmentDeferredRendering.wgsl').then((r) => r.text()).then((r) => fragmentDeferredRendering = r),
         fetch('./shadowGen.wgsl').then((r) => r.text()).then((r) => shadowGenShader = r),
+        fetch('./unlit.wgsl').then((r) => r.text()).then((r) => unlitShader = r),
     ])
 
     const devicePixelRatio = window.devicePixelRatio || 1;
@@ -411,7 +416,7 @@ const init = async ({ device, canvas, gui }) => {
 
     const settings = {
         mode: 'rendering',
-        numLights: 1,
+        numLights: 10,
     };
 
     gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
@@ -574,6 +579,110 @@ const init = async ({ device, canvas, gui }) => {
     })
 
     // ^^^ シャドウマップ関連 ^^^
+
+    // VVV unlit関連 VVV
+
+    const meshForLight = createSphere(1.0, 12, 6)
+    const meshForLightVertexStride = 5;
+    const meshForLightVerticesBuffer = (() => {
+        const vertexBuffer = device.createBuffer({
+            // position: vec3, normal: vec3, uv: vec2
+            size: meshForLight.positions.length * meshForLightVertexStride * Float32Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.VERTEX,
+            mappedAtCreation: true,
+        });
+        {
+            const mapping = new Float32Array(vertexBuffer.getMappedRange());
+            for (let i = 0; i < meshForLight.positions.length; ++i) {
+                mapping.set(meshForLight.positions[i], meshForLightVertexStride * i);
+                mapping.set(meshForLight.uvs[i], meshForLightVertexStride * i + 3);
+            }
+            vertexBuffer.unmap();
+        }
+        return vertexBuffer
+    })()
+    const meshForLightIndexCount = meshForLight.triangles.length * 3
+    const meshForLightIndexBuffer = ((indexCount) => {
+        const indexBuffer = device.createBuffer({
+            size: indexCount * Uint16Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.INDEX,
+            mappedAtCreation: true,
+        });
+        const mapping = new Uint16Array(indexBuffer.getMappedRange());
+        for (let i = 0; i < meshForLight.triangles.length; ++i) {
+            mapping.set(meshForLight.triangles[i], 3 * i);
+        }
+        indexBuffer.unmap();
+        return indexBuffer
+    })(meshForLightIndexCount)
+
+    const unlitPipeline = device.createRenderPipeline({
+        label: 'unlitPipeline',
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [
+                cameraUniformBufferBindGroupLayout,
+                lightStorageBufferBindGroupLayout,
+            ],
+        }),
+        vertex: {
+            module: device.createShaderModule({
+                code: unlitShader,
+            }),
+            entryPoint: 'vertexMain',
+            buffers: [
+                {
+                    arrayStride: Float32Array.BYTES_PER_ELEMENT * meshForLightVertexStride,
+                    attributes: [
+                        {
+                            // position
+                            shaderLocation: 0,
+                            offset: 0,
+                            format: 'float32x3',
+                        },
+                        {
+                            // uv
+                            shaderLocation: 1,
+                            offset: Float32Array.BYTES_PER_ELEMENT * 3,
+                            format: 'float32x2',
+                        },
+                    ],
+                },
+            ],
+        },
+        fragment: {
+            module: device.createShaderModule({
+                code: unlitShader,
+            }),
+            entryPoint: 'fragmentMain',
+            targets: [{
+                format: presentationFormat,
+            }],
+        },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus',
+        },
+        primitive,
+    })
+
+    const unlitPassDescriptor = {
+        colorAttachments: [
+            {
+                // view is acquired and set in render loop.
+                view: undefined,
+                loadOp: 'load',
+                storeOp: 'store',
+            },
+        ],
+        depthStencilAttachment: {
+            view: depthTexture.createView(),
+            depthLoadOp: 'load',
+            depthStoreOp: 'store',
+        },
+    };
+
+    // ^^^ unlit関連 ^^^
 
     const gBufferTextureViews = [
         gBufferTextureNormal.createView(),
@@ -776,6 +885,17 @@ const init = async ({ device, canvas, gui }) => {
                 deferredRenderingPass.setBindGroup(2, lightStorageBindGroup);
                 deferredRenderingPass.draw(6);
                 deferredRenderingPass.end();
+
+                // フォワードレンダリングで点光源の位置に描画してやる
+                unlitPassDescriptor.colorAttachments[0].view = view
+                const unlitPass = commandEncoder.beginRenderPass(unlitPassDescriptor)
+                unlitPass.setPipeline(unlitPipeline);
+                unlitPass.setBindGroup(0, cameraUniformBindGroup);
+                unlitPass.setBindGroup(1, lightStorageBindGroup);
+                unlitPass.setVertexBuffer(0, meshForLightVerticesBuffer);
+                unlitPass.setIndexBuffer(meshForLightIndexBuffer, 'uint16');
+                unlitPass.drawIndexed(meshForLightIndexCount, settings.numLights);
+                unlitPass.end();
             }
         }
         device.queue.submit([commandEncoder.finish()]);
