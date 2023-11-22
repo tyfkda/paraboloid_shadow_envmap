@@ -432,7 +432,7 @@ const init = async ({ device, canvas, gui }) => {
         });
 
     const cameraUniformBuffer = device.createBuffer({
-        size: 4 * 16 * 2, // two 4x4 matrix
+        size: 4 * 16 * 2 + 4 * 4, // two 4x4 matrix + one vec3
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -792,29 +792,41 @@ const init = async ({ device, canvas, gui }) => {
         const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
-        return mat4.multiply(projectionMatrix, viewMatrix)
+        return {
+            matrix: mat4.multiply(projectionMatrix, viewMatrix),
+            position: rotatedEyePosition,
+        };
     }
 
     function frame() {
         // Sample is no longer the active page.
 
         const t = Date.now() * (1 / 1000);
-        const cameraViewProj = getCameraViewProjMatrix(t);
-        device.queue.writeBuffer(
-            cameraUniformBuffer,
-            0,
-            cameraViewProj.buffer,
-            cameraViewProj.byteOffset,
-            cameraViewProj.byteLength
-        );
-        const cameraInvViewProj = mat4.invert(cameraViewProj);
-        device.queue.writeBuffer(
-            cameraUniformBuffer,
-            64,
-            cameraInvViewProj.buffer,
-            cameraInvViewProj.byteOffset,
-            cameraInvViewProj.byteLength
-        );
+        {
+            const {matrix, position} = getCameraViewProjMatrix(t);
+            device.queue.writeBuffer(
+                cameraUniformBuffer,
+                0,
+                matrix.buffer,
+                matrix.byteOffset,
+                matrix.byteLength
+            );
+            const cameraInvViewProj = mat4.invert(matrix);
+            device.queue.writeBuffer(
+                cameraUniformBuffer,
+                4 * 16,
+                cameraInvViewProj.buffer,
+                cameraInvViewProj.byteOffset,
+                cameraInvViewProj.byteLength
+            );
+            device.queue.writeBuffer(
+                cameraUniformBuffer,
+                4 * 16 * 2,
+                position.buffer,
+                position.byteOffset,
+                position.byteLength
+            );
+        }
 
         {
             const modelData = modelMatrix;

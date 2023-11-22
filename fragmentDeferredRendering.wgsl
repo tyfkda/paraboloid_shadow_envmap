@@ -14,6 +14,7 @@ override shadowDepthTextureSize: f32 = 1024.0;
 struct Camera {
     viewProjectionMatrix : mat4x4<f32>,
     invViewProjectionMatrix : mat4x4<f32>,
+    position: vec3<f32>,  // World camera position
 }
 @group(1) @binding(0) var<uniform> camera: Camera;
 
@@ -106,9 +107,14 @@ fn main(
 
         let diff = light.pos - position;
         let invlen = inverseSqrt(dot(diff, diff));
-        let lambertFactor = max(dot(diff * invlen, normal), 0.0);
+        let lightVec = diff * invlen;
+        let lambertFactor = max(dot(lightVec, normal), 0.0);
         let decay = 1.0 / (4 * PI) * (invlen * invlen);
-        let lightingFactor = visibility * lambertFactor * decay;
+        let lightingFactor = visibility * decay;
+
+        let viewDir = normalize(camera.position - position);
+        let halfDir = normalize(viewDir + lightVec);
+        let specularFactor = pow(max(dot(halfDir, normal), 0.0), 200.0);
 
         let albedo = textureLoad(
             gBufferAlbedo,
@@ -116,7 +122,7 @@ fn main(
             0
         ).rgb;
 
-        total += lightingFactor * light.color.rgb * albedo;
+        total += lightingFactor * light.color.rgb * (lambertFactor * albedo + specularFactor);
     }
 
     return vec4(gamma(tonemap(total)), 1.0);
