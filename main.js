@@ -1,6 +1,7 @@
 import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
-import {mesh} from './stanford-dragon.js'
+import {mesh as dragonMeshData} from './stanford-dragon.js'
+import {mesh as backgroundMeshData} from './background.js'
 import {createSphere} from './utils.js'
 
 const kMaxNumLights = 32;
@@ -98,6 +99,48 @@ class PointLight {
     }
 }
 
+class Mesh {
+    constructor(device, meshData, vertexStride = 8) {
+        this.vertexBuffer = device.createBuffer({
+            // position: vec3, normal: vec3, uv: vec2
+            size:
+                meshData.positions.length * vertexStride * Float32Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.VERTEX,
+            mappedAtCreation: true,
+        });
+        {
+            const mapping = new Float32Array(this.vertexBuffer.getMappedRange());
+            for (let i = 0; i < meshData.positions.length; ++i) {
+                mapping.set(meshData.positions[i], vertexStride * i);
+                mapping.set(meshData.normals[i], vertexStride * i + 3);
+                mapping.set(meshData.uvs[i], vertexStride * i + 6);
+            }
+            this.vertexBuffer.unmap();
+        }
+
+        // Create the model index buffer.
+        this.indexCount = meshData.triangles.length * 3;
+        this.indexBuffer = device.createBuffer({
+            size: this.indexCount * Uint16Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.INDEX,
+            mappedAtCreation: true,
+        });
+        {
+            const mapping = new Uint16Array(this.indexBuffer.getMappedRange());
+            for (let i = 0; i < meshData.triangles.length; ++i) {
+                mapping.set(meshData.triangles[i], 3 * i);
+            }
+            this.indexBuffer.unmap();
+        }
+    }
+}
+
+class GameObject {
+    constructor(_device, mesh) {
+        this.mesh = mesh;
+    }
+}
+
 async function isWebGpuSupported() {
     let device = null
     if (navigator.gpu) {
@@ -142,38 +185,10 @@ const init = async ({ device, canvas, gui }) => {
     });
 
     // Create the model vertex buffer.
-    const kVertexStride = 8;
-    const vertexBuffer = device.createBuffer({
-        // position: vec3, normal: vec3, uv: vec2
-        size:
-            mesh.positions.length * kVertexStride * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.VERTEX,
-        mappedAtCreation: true,
-    });
-    {
-        const mapping = new Float32Array(vertexBuffer.getMappedRange());
-        for (let i = 0; i < mesh.positions.length; ++i) {
-            mapping.set(mesh.positions[i], kVertexStride * i);
-            mapping.set(mesh.normals[i], kVertexStride * i + 3);
-            mapping.set(mesh.uvs[i], kVertexStride * i + 6);
-        }
-        vertexBuffer.unmap();
-    }
+    const dragonObject = new GameObject(device, new Mesh(device, dragonMeshData))
+    const backgroundObject = new GameObject(device, new Mesh(device, backgroundMeshData))
+    const sceneGameObjects = [dragonObject, backgroundObject]
 
-    // Create the model index buffer.
-    const indexCount = mesh.triangles.length * 3;
-    const indexBuffer = device.createBuffer({
-        size: indexCount * Uint16Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.INDEX,
-        mappedAtCreation: true,
-    });
-    {
-        const mapping = new Uint16Array(indexBuffer.getMappedRange());
-        for (let i = 0; i < mesh.triangles.length; ++i) {
-            mapping.set(mesh.triangles[i], 3 * i);
-        }
-        indexBuffer.unmap();
-    }
 
     // GBuffer texture render targets
     const gBufferTextureNormal = device.createTexture({
@@ -853,23 +868,25 @@ const init = async ({ device, canvas, gui }) => {
                 shadowPass.setBindGroup(0, lightStorageBindGroup);
                 shadowPass.setBindGroup(1, modelUniformBindGroup);
                 shadowPass.setBindGroup(2, shadowUniformBindGroups[i >> 1])
-                shadowPass.setVertexBuffer(0, vertexBuffer);
-                shadowPass.setIndexBuffer(indexBuffer, 'uint16');
-                shadowPass.drawIndexed(indexCount);
+                for (const go of sceneGameObjects) {
+                    shadowPass.setVertexBuffer(0, go.mesh.vertexBuffer);
+                    shadowPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
+                    shadowPass.drawIndexed(go.mesh.indexCount);
+                }
                 shadowPass.end();
             }
         }
         {
-            // Write position, normal, albedo etc. data to gBuffers
-            const gBufferPass = commandEncoder.beginRenderPass(
-                writeGBufferPassDescriptor
-            );
+            const gBufferPass = commandEncoder.beginRenderPass(writeGBufferPassDescriptor);
             gBufferPass.setPipeline(writeGBuffersPipeline);
             gBufferPass.setBindGroup(0, cameraUniformBindGroup);
             gBufferPass.setBindGroup(1, modelUniformBindGroup);
-            gBufferPass.setVertexBuffer(0, vertexBuffer);
-            gBufferPass.setIndexBuffer(indexBuffer, 'uint16');
-            gBufferPass.drawIndexed(indexCount);
+            for (const go of sceneGameObjects) {
+                // Write position, normal, albedo etc. data to gBuffers
+                gBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
+                gBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
+                gBufferPass.drawIndexed(go.mesh.indexCount);
+            }
             gBufferPass.end();
         }
         {
