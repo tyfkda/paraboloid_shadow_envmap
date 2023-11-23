@@ -70,7 +70,11 @@ export function computeProjectedPlaneUVs(
   return uvs
 }
 
-export function addRect(mesh, basePos, vec1, vec2, normal, div) {
+export function addRect(mesh, basePos, vec1, vec2, normal, color, div) {
+    if (mesh.colors == undefined) {
+        mesh.colors = []
+    }
+
     const baseIndex = mesh.positions.length
     const nv = div + 1
     // Triangle
@@ -95,6 +99,7 @@ export function addRect(mesh, basePos, vec1, vec2, normal, div) {
                 basePos[2] + vec1[2] * pj + vec2[2] * pi])
             mesh.normals.push(normal)
             mesh.uvs.push([pj, pi])
+            mesh.colors.push(color)
         }
     }
 }

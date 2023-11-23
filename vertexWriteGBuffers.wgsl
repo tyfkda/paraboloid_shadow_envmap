@@ -29,7 +29,8 @@ struct VertexOutput {
 fn main(
     @location(0) position : vec3<f32>,
     @location(1) normal : vec3<f32>,
-    @location(2) uv : vec2<f32>
+    @location(2) uv : vec2<f32>,
+    @location(3) color : vec3<f32>,
 ) -> VertexOutput {
     var output : VertexOutput;
     let worldPosition = (model.modelMatrix * vec4(position, 1.0)).xyz;
@@ -50,6 +51,6 @@ fn main(
     output.fragNormal = fragNormal;
     output.fragUV = uv;
     output.zvalue = zvalue;
-    output.color_reflectivity = material.color_reflectivity;
+    output.color_reflectivity = vec4(color, material.color_reflectivity.a);
     return output;
 }

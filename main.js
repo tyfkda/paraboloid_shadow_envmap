@@ -135,7 +135,7 @@ class Material {
 }
 
 class Mesh {
-    constructor(device, meshData, vertexStride = 8) {
+    constructor(device, meshData, vertexStride = 11) {
         this.vertexBuffer = device.createBuffer({
             // position: vec3, normal: vec3, uv: vec2
             size:
@@ -149,6 +149,7 @@ class Mesh {
                 mapping.set(meshData.positions[i], vertexStride * i);
                 mapping.set(meshData.normals[i], vertexStride * i + 3);
                 mapping.set(meshData.uvs[i], vertexStride * i + 6);
+                mapping.set(meshData.colors[i], vertexStride * i + 8);
             }
             this.vertexBuffer.unmap();
         }
@@ -239,7 +240,7 @@ const init = async ({ device, canvas, gui }) => {
 
     const vertexBuffers = [
         {
-            arrayStride: Float32Array.BYTES_PER_ELEMENT * 8,
+            arrayStride: Float32Array.BYTES_PER_ELEMENT * 11,
             attributes: [
                 {
                     // position
@@ -258,6 +259,12 @@ const init = async ({ device, canvas, gui }) => {
                     shaderLocation: 2,
                     offset: Float32Array.BYTES_PER_ELEMENT * 6,
                     format: 'float32x2',
+                },
+                {
+                    // color
+                    shaderLocation: 3,
+                    offset: Float32Array.BYTES_PER_ELEMENT * 8,
+                    format: 'float32x3',
                 },
             ],
         },
