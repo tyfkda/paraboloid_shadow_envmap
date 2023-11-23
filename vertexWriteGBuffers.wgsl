@@ -12,11 +12,17 @@ struct Model {
 }
 @group(1) @binding(0) var<uniform> model : Model;
 
+struct Material {
+    color_reflectivity: vec4<f32>,  // rgb, a=specular.
+}
+@group(2) @binding(0) var<uniform> material: Material;
+
 struct VertexOutput {
     @builtin(position) Position : vec4<f32>,
     @location(0) fragNormal: vec3<f32>,    // normal in world space
     @location(1) fragUV: vec2<f32>,
     @location(2) zvalue: f32,
+    @location(3) color_reflectivity : vec4<f32>,
 }
 
 @vertex
@@ -44,5 +50,6 @@ fn main(
     output.fragNormal = fragNormal;
     output.fragUV = uv;
     output.zvalue = zvalue;
+    output.color_reflectivity = material.color_reflectivity;
     return output;
 }

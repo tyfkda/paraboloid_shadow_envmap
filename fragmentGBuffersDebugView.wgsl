@@ -55,10 +55,10 @@ fn main(
         } else {
             c.x = c.x * 3.0 - 2.0;
             result = textureLoad(
-                envmapAlbedo,
+                envmap,
                 vec2<i32>(floor(c * vec2<f32>(kEnvmapWidth, kEnvmapHeight))),  // shadowDepthTextureSize
-                0);
-            result = (result + 1.0) * 0.5;
+                0, 0);
+            result = vec4(gamma(tonemap(result.xyz)), result.a);
         }
     } else if (c.y < 2.0 / 3) {
         c.y = c.y * 3.0 - 1.0;
@@ -83,7 +83,7 @@ fn main(
             result = textureLoad(
                 envmap,
                 vec2<i32>(floor(c * vec2<f32>(kEnvmapWidth, kEnvmapHeight))),  // shadowDepthTextureSize
-                0, 0);
+                1, 0);
             result = vec4(gamma(tonemap(result.xyz)), result.a);
         }
     } else {
@@ -112,5 +112,5 @@ fn main(
                 0);
         }
     }
-    return result;
+    return vec4(result.rgb, 1.0);
 }

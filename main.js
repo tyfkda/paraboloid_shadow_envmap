@@ -100,6 +100,40 @@ class PointLight {
     }
 }
 
+class Material {
+    constructor(device, color, reflectivity, uniformLayout) {
+        this.uniformBuffer = device.createBuffer({
+            size: 4 * 4, // one color+reflectivity.
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        this.uniformBindGroup = device.createBindGroup({
+            layout: uniformLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: this.uniformBuffer,
+                    },
+                },
+            ],
+        });
+
+        this.updateValue(device, color, reflectivity)
+    }
+
+    updateValue(device, color, reflectivity) {
+        const data = new Float32Array([color[0], color[1], color[2], reflectivity])
+        device.queue.writeBuffer(
+            this.uniformBuffer,
+            0,
+            data.buffer,
+            data.byteOffset,
+            data.byteLength
+        )
+    }
+}
+
 class Mesh {
     constructor(device, meshData, vertexStride = 8) {
         this.vertexBuffer = device.createBuffer({
@@ -137,8 +171,9 @@ class Mesh {
 }
 
 class GameObject {
-    constructor(_device, mesh) {
+    constructor(_device, mesh, material) {
         this.mesh = mesh;
+        this.material = material;
     }
 }
 
@@ -184,12 +219,6 @@ const init = async ({ device, canvas, gui }) => {
         format: presentationFormat,
         alphaMode: 'premultiplied',
     });
-
-    // Create the model vertex buffer.
-    const dragonObject = new GameObject(device, new Mesh(device, dragonMeshData))
-    const backgroundObject = new GameObject(device, new Mesh(device, backgroundMeshData))
-    const sceneGameObjects = [dragonObject, backgroundObject]
-
 
     // GBuffer texture render targets
     const gBufferTextureNormal = device.createTexture({
@@ -254,6 +283,7 @@ const init = async ({ device, canvas, gui }) => {
 
     const cameraUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
     const modelUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
+    const materialUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
 
     const lightStorageBufferBindGroupLayout = device.createBindGroupLayout({
         label: 'lightStorageBufferBindGroupLayout',
@@ -273,6 +303,7 @@ const init = async ({ device, canvas, gui }) => {
             bindGroupLayouts: [
                 cameraUniformBufferBindGroupLayout,
                 modelUniformBufferBindGroupLayout,
+                materialUniformBufferBindGroupLayout,
             ],
         }),
         vertex: {
@@ -379,6 +410,27 @@ const init = async ({ device, canvas, gui }) => {
         ],
     });
 
+    const envmapTexturesBindGroupLayout = device.createBindGroupLayout({
+        label: 'envmapTexturesBindGroupLayout',
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {
+                    sampleType: 'unfilterable-float',
+                    viewDimension: '2d-array',
+                },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: {
+                    type: 'non-filtering',
+                },
+            },
+        ],
+    });
+
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
         label: 'gBuffersDebugViewPipeline',
         layout: device.createPipelineLayout({
@@ -418,6 +470,7 @@ const init = async ({ device, canvas, gui }) => {
                 gBufferTexturesBindGroupLayout,
                 cameraUniformBufferBindGroupLayout,
                 lightStorageBufferBindGroupLayout,
+                envmapTexturesBindGroupLayout,
             ],
         }),
         vertex: {
@@ -430,7 +483,7 @@ const init = async ({ device, canvas, gui }) => {
             module: device.createShaderModule({
                 code: fragmentDeferredRendering,
             }),
-            entryPoint: 'main',
+            entryPoint: 'mainWithEnvmap',
             targets: [
                 {
                     format: presentationFormat,
@@ -468,12 +521,22 @@ const init = async ({ device, canvas, gui }) => {
         ],
     };
 
+    const MODE_RENDERING = 'rendering'
+    const MODE_GBUFFER = 'gBuffers view'
+
     const settings = {
-        mode: 'rendering',
+        mode: MODE_RENDERING,
+        reflectivity: 1.0,
         numLights: 10,
     };
 
-    gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
+    gui.add(settings, 'mode', [MODE_RENDERING, MODE_GBUFFER])
+    gui
+        .add(settings, 'reflectivity', 0.0, 1.0)
+        .step(0.01)
+        .onChange(() => {
+            mirrorMaterial.updateValue(device, [1.0, 1.0, 1.0], settings.reflectivity)
+        });
     gui
         .add(settings, 'numLights', 1, kMaxNumLights)
         .step(1)
@@ -484,6 +547,15 @@ const init = async ({ device, canvas, gui }) => {
                 new Uint32Array([settings.numLights])
             );
         });
+
+    const materialUniformLayoutGroup = writeGBuffersPipeline.getBindGroupLayout(1)
+    const blinnPhongMaterial = new Material(device, [1.0, 1.0, 1.0], 0.0, materialUniformLayoutGroup)
+    const mirrorMaterial = new Material(device, [1.0, 1.0, 1.0], settings.reflectivity, materialUniformLayoutGroup)
+
+    // Create the model vertex buffer.
+    const dragonObject = new GameObject(device, new Mesh(device, dragonMeshData), mirrorMaterial)
+    const backgroundObject = new GameObject(device, new Mesh(device, backgroundMeshData), blinnPhongMaterial)
+    const sceneGameObjects = [dragonObject, backgroundObject]
 
     const cameraUniformBuffer = device.createBuffer({
         size: 4 * 16 * 2 + 4 * 4, // two 4x4 matrix + one vec3
@@ -791,6 +863,7 @@ const init = async ({ device, canvas, gui }) => {
                 bindGroupLayouts: [
                     cameraUniformBufferBindGroupLayout,
                     modelUniformBufferBindGroupLayout,
+                    materialUniformBufferBindGroupLayout,
                 ],
             }),
             vertex: {
@@ -866,7 +939,7 @@ const init = async ({ device, canvas, gui }) => {
             module: device.createShaderModule({
                 code: fragmentDeferredRendering,
             }),
-            entryPoint: 'main',
+            entryPoint: 'mainWithoutEnvmap',
             targets: [
                 {
                     format: kEnvmapTextureFormat,
@@ -916,7 +989,21 @@ const init = async ({ device, canvas, gui }) => {
                 binding: 4,
                 resource: device.createSampler({
                     compare: 'less',
-                })
+                }),
+            },
+        ],
+    });
+
+    const envmapTexturesBindGroup = device.createBindGroup({
+        layout: envmapTexturesBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: envmapTexture.createView(),
+            },
+            {
+                binding: 1,
+                resource: device.createSampler(),
             },
         ],
     });
@@ -1092,9 +1179,14 @@ const init = async ({ device, canvas, gui }) => {
 
             // 環境マップ作成用のカメラにも設定（プロジェクション変換はなし）
             {
-                const envmapViewMatrix = mat4.clone(viewMatrix)
-                envmapViewMatrix[12] = envmapViewMatrix[14] = 0.0  // 位置を原点付近に
-                envmapViewMatrix[13] = -20;
+                // 環境マッピングはワールド座標系で計算するのでカメラの回転は加えず、
+                // モデル中心への変換行列
+                const envmapViewMatrix = mat4.create(
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, -60.0, 0.0, 1.0,
+                )
 
                 let envmapProjectionMatrix = (() => {
                     const far = 400 * 2
@@ -1175,6 +1267,7 @@ const init = async ({ device, canvas, gui }) => {
                 for (const go of sceneGameObjects) {
                     if (go === dragonObject)
                         continue
+                    envmapGBufferPass.setBindGroup(2, go.material.uniformBindGroup);
                     envmapGBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
                     envmapGBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
                     envmapGBufferPass.drawIndexed(go.mesh.indexCount);
@@ -1200,6 +1293,7 @@ const init = async ({ device, canvas, gui }) => {
             gBufferPass.setBindGroup(1, modelUniformBindGroup);
             for (const go of sceneGameObjects) {
                 // Write position, normal, albedo etc. data to gBuffers
+                gBufferPass.setBindGroup(2, go.material.uniformBindGroup);
                 gBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
                 gBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
                 gBufferPass.drawIndexed(go.mesh.indexCount);
@@ -1230,6 +1324,7 @@ const init = async ({ device, canvas, gui }) => {
                 deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);
                 deferredRenderingPass.setBindGroup(1, cameraUniformBindGroup);
                 deferredRenderingPass.setBindGroup(2, lightStorageBindGroup);
+                deferredRenderingPass.setBindGroup(3, envmapTexturesBindGroup);
                 deferredRenderingPass.draw(6);
                 deferredRenderingPass.end();
 

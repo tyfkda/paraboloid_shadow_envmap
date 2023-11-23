@@ -30,6 +30,9 @@ struct LightInfo {
 }
 @group(2) @binding(0) var<storage, read> light_info : LightInfo;
 
+@group(3) @binding(0) var envmap: texture_2d_array<f32>;
+@group(3) @binding(1) var envmap_sampler: sampler;
+
 fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
     // TODO: paraboloid の場合の逆算
 
@@ -56,10 +59,127 @@ fn gamma(rgb: vec3<f32>) -> vec3<f32> {
     return pow(rgb, vec3(1.0 / GAMMA));
 }
 
+fn sampleReflection(position: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    let v = normalize(position - camera.position);
+    let dt = dot(v, normal);
+    var color: vec3<f32>;
+    var d = v - 2 * dt * normal;  //reflect(v, normal);
+    if (dt >= 0) {
+        d = v;
+    }
+
+    var dir: u32;
+    var uv: vec2<f32>;
+    if (d.z >= 0) {
+        uv = 0.5 + (d.xy / (d.z + 1.0)) * 0.5;
+        dir = 1;
+    } else {
+        uv = 0.5 + (d.xy / (1.0 - d.z)) * 0.5;
+        dir = 0;
+    }
+    // vpPosition = vec4(dd, rz, 1);
+    // zvalue = d.z;
+
+    // uv.x = 1.0 - uv.x;
+    uv.y = 1.0 - uv.y;
+    return textureSample(envmap, envmap_sampler, uv, dir).rgb;
+}
+
+struct FragmentInfo {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    albedo: vec3<f32>,
+    reflectivity: f32,
+    depth: f32,
+}
+
+fn getFragmentInfo(input: FragmentInput, depth: f32) -> FragmentInfo {
+    var frag: FragmentInfo;
+
+    frag.normal = textureLoad(gBufferNormal, vec2<i32>(floor(input.coord.xy)), 0).xyz;
+    let albedo_reflectivity = textureLoad(gBufferAlbedo, vec2<i32>(floor(input.coord.xy)), 0);
+    frag.albedo = albedo_reflectivity.rgb;
+    frag.reflectivity = albedo_reflectivity.a;
+    frag.depth = depth;
+
+    let bufferSize = textureDimensions(gBufferDepth);
+    let coordUV = input.coord.xy / vec2<f32>(bufferSize);
+    frag.position = world_from_screen_coord(coordUV, depth);
+
+    return frag;
+}
+
+struct ShadingResult {
+    visibility: f32,
+    decay: f32,
+    lambertFactor: f32,
+    specularFactor: f32,
+}
+
 const kLightDirections = array(1.0, -1.0);
 
+fn calcPointLighting(frag: FragmentInfo, light: Light, shadowmapBaseIndex: u32) -> ShadingResult {
+    var result: ShadingResult;
+
+    // XY is in (-1, 1) space, Z is in (0, 1) space
+    let posFromLight0 = light.viewProjMatrix * vec4(frag.position, 1.0);
+    let zdir = select(1u, 0u, posFromLight0.z >= 0.0);  // 0=前、1=後ろ
+
+    // 放物面変換
+    let shadowZ = length(posFromLight0.xyz);
+    var posFromLightOrg = posFromLight0.xyz / shadowZ;
+    posFromLightOrg.z *= kLightDirections[zdir];  // 光源との向きによって前後を選択
+    let posFromLightXY = posFromLightOrg.xy / (posFromLightOrg.z + 1.0);
+
+    // Convert XY to (0, 1)
+    // Y is flipped because texture coords are Y-down.
+    var shadowPos = posFromLightXY * vec2(0.5, -0.5) + vec2(0.5);
+
+    // Percentage-closer filtering. Sample texels in the region
+    // to smooth the result.
+    var visibility = 0.0;
+    let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
+    let shadowmapIndex = shadowmapBaseIndex + zdir;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
+            visibility += textureSampleCompare(
+                shadowMap, shadowSampler,
+                shadowPos.xy + offset, shadowmapIndex,
+                shadowZ - SHADOW_Z_OFFSET
+            );
+        }
+    }
+    result.visibility = visibility / 9.0;
+if (paraboloid) { result.visibility = 1.0; }
+
+    let diff = light.pos - frag.position;
+    let invlen = inverseSqrt(dot(diff, diff));
+    let lightVec = diff * invlen;
+    result.lambertFactor = max(dot(lightVec, frag.normal), 0.0);
+    result.decay = 1.0 / (4 * PI) * (invlen * invlen);
+
+    let viewDir = normalize(camera.position - frag.position);
+    let halfDir = normalize(viewDir + lightVec);
+    result.specularFactor = pow(max(dot(halfDir, frag.normal), 0.0), 200.0);
+
+    return result;
+}
+
+fn shading(frag: FragmentInfo) -> vec3<f32> {
+    var total : vec3<f32> = vec3(0, 0, 0);
+    for (var lightIndex = 0u; lightIndex < light_info.numLights; lightIndex += 1) {
+        let light = light_info.lights[lightIndex];
+        let r = calcPointLighting(frag, light, lightIndex * 2);
+
+        let lightingFactor = r.visibility * r.decay * light.color.rgb;
+        total += lightingFactor * (frag.albedo * r.lambertFactor + r.specularFactor);
+    }
+    return total;
+}
+
 @fragment
-fn main(
+fn mainWithEnvmap(
     input : FragmentInput
 ) -> @location(0) vec4<f32> {
     let depth = textureLoad(gBufferDepth, vec2<i32>(floor(input.coord.xy)), 0);
@@ -67,68 +187,30 @@ fn main(
         discard;
     }
 
-    let normal = textureLoad(gBufferNormal, vec2<i32>(floor(input.coord.xy)), 0).xyz;
+    var frag = getFragmentInfo(input, depth);
+    var total = shading(frag);
+    let reflection = sampleReflection(frag.position, frag.normal);
+    if (frag.reflectivity > 0.0) {
+        total += (reflection - total) * frag.reflectivity;
+    }
+    if (!paraboloid) {
+        total = gamma(tonemap(total));
+    }
+    return vec4(total, 1.0);
+}
 
-    let bufferSize = textureDimensions(gBufferDepth);
-    let coordUV = input.coord.xy / vec2<f32>(bufferSize);
-    let position = world_from_screen_coord(coordUV, depth);
 
-    var total : vec3<f32> = vec3(0, 0, 0);
-    for (var lightIndex = 0u; lightIndex < light_info.numLights; lightIndex += 1) {
-        let light = light_info.lights[lightIndex];
-
-        // XY is in (-1, 1) space, Z is in (0, 1) space
-        let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
-        let zdir = select(1u, 0u, posFromLight0.z >= 0.0);  // 0=前、1=後ろ
-
-        // 放物面変換
-        let shadowZ = length(posFromLight0.xyz);
-        var posFromLightOrg = posFromLight0.xyz / shadowZ;
-        posFromLightOrg.z *= kLightDirections[zdir];  // 光源との向きによって前後を選択
-        let posFromLightXY = posFromLightOrg.xy / (posFromLightOrg.z + 1.0);
-
-        // Convert XY to (0, 1)
-        // Y is flipped because texture coords are Y-down.
-        var shadowPos = posFromLightXY * vec2(0.5, -0.5) + vec2(0.5);
-
-        // Percentage-closer filtering. Sample texels in the region
-        // to smooth the result.
-        var visibility = 0.0;
-        let oneOverShadowDepthTextureSize = 1.0 / shadowDepthTextureSize;
-        let shadowmapIndex = lightIndex * 2 + zdir;
-        for (var y = -1; y <= 1; y++) {
-            for (var x = -1; x <= 1; x++) {
-                let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
-                visibility += textureSampleCompare(
-                    shadowMap, shadowSampler,
-                    shadowPos.xy + offset, shadowmapIndex,
-                    shadowZ - SHADOW_Z_OFFSET
-                );
-            }
-        }
-        visibility /= 9.0;
-if (paraboloid) { visibility = 1.0; }
-
-        let diff = light.pos - position;
-        let invlen = inverseSqrt(dot(diff, diff));
-        let lightVec = diff * invlen;
-        let lambertFactor = max(dot(lightVec, normal), 0.0);
-        let decay = 1.0 / (4 * PI) * (invlen * invlen);
-        let lightingFactor = visibility * decay;
-
-        let viewDir = normalize(camera.position - position);
-        let halfDir = normalize(viewDir + lightVec);
-        let specularFactor = pow(max(dot(halfDir, normal), 0.0), 200.0);
-
-        let albedo = textureLoad(
-            gBufferAlbedo,
-            vec2<i32>(floor(input.coord.xy)),
-            0
-        ).rgb;
-
-        total += lightingFactor * light.color.rgb * (lambertFactor * albedo + specularFactor);
+@fragment
+fn mainWithoutEnvmap(
+    input : FragmentInput
+) -> @location(0) vec4<f32> {
+    let depth = textureLoad(gBufferDepth, vec2<i32>(floor(input.coord.xy)), 0);
+    if (depth >= 1.0) {
+        discard;
     }
 
+    var frag = getFragmentInfo(input, depth);
+    var total = shading(frag);
     if (!paraboloid) {
         total = gamma(tonemap(total));
     }
