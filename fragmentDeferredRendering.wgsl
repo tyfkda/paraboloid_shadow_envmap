@@ -57,26 +57,20 @@ fn gamma(rgb: vec3<f32>) -> vec3<f32> {
 fn main(
     input : FragmentInput
 ) -> @location(0) vec4<f32> {
-    var total : vec3<f32> = vec3(0, 0, 0);
+    let depth = textureLoad(gBufferDepth, vec2<i32>(floor(input.coord.xy)), 0);
+    if (depth >= 1.0) {
+        discard;
+    }
 
+    let normal = textureLoad(gBufferNormal, vec2<i32>(floor(input.coord.xy)), 0).xyz;
+
+    let bufferSize = textureDimensions(gBufferDepth);
+    let coordUV = input.coord.xy / vec2<f32>(bufferSize);
+    let position = world_from_screen_coord(coordUV, depth);
+
+    var total : vec3<f32> = vec3(0, 0, 0);
     for (var lightIndex = 0u; lightIndex < config.numLights; lightIndex += 1) {
         let light = lights[lightIndex];
-        let depth = textureLoad(
-            gBufferDepth,
-            vec2<i32>(floor(input.coord.xy)),
-            0
-        );
-        let hasPixel = select(0.0, 1.0, depth < 1.0);
-
-        let bufferSize = textureDimensions(gBufferDepth);
-        let coordUV = input.coord.xy / vec2<f32>(bufferSize);
-        let position = world_from_screen_coord(coordUV, depth);
-
-        let normal = textureLoad(
-            gBufferNormal,
-            vec2<i32>(floor(input.coord.xy)),
-            0
-        ).xyz;
 
         // XY is in (-1, 1) space, Z is in (0, 1) space
         let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
@@ -118,7 +112,7 @@ fn main(
             0
         ).rgb;
 
-        total += hasPixel * inSpotLight * lightingFactor * light.color.rgb * albedo;
+        total += inSpotLight * lightingFactor * light.color.rgb * albedo;
     }
 
     return vec4(gamma(tonemap(total)), 1.0);
