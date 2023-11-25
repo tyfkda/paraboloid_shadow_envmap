@@ -749,6 +749,26 @@ const init = async ({ device, canvas, gui }) => {
         return indexBuffer
     })(meshForLightIndexCount)
 
+    const unlitVertexBuffersDescritors = [
+        {
+            arrayStride: Float32Array.BYTES_PER_ELEMENT * meshForLightVertexStride,
+            attributes: [
+                {
+                    // position
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: 'float32x3',
+                },
+                {
+                    // uv
+                    shaderLocation: 1,
+                    offset: Float32Array.BYTES_PER_ELEMENT * 3,
+                    format: 'float32x2',
+                },
+            ],
+        },
+    ]
+
     const unlitPipeline = device.createRenderPipeline({
         label: 'unlitPipeline',
         layout: device.createPipelineLayout({
@@ -762,25 +782,7 @@ const init = async ({ device, canvas, gui }) => {
                 code: unlitShader,
             }),
             entryPoint: 'vertexMain',
-            buffers: [
-                {
-                    arrayStride: Float32Array.BYTES_PER_ELEMENT * meshForLightVertexStride,
-                    attributes: [
-                        {
-                            // position
-                            shaderLocation: 0,
-                            offset: 0,
-                            format: 'float32x3',
-                        },
-                        {
-                            // uv
-                            shaderLocation: 1,
-                            offset: Float32Array.BYTES_PER_ELEMENT * 3,
-                            format: 'float32x2',
-                        },
-                    ],
-                },
-            ],
+            buffers: unlitVertexBuffersDescritors,
         },
         fragment: {
             module: device.createShaderModule({
@@ -1014,6 +1016,61 @@ const init = async ({ device, canvas, gui }) => {
             },
         ],
     });
+
+    const envmapUnlitPassDescriptors = [...Array(2)].map((_, i) => { return {
+            colorAttachments: [
+                {
+                    // view is acquired and set in render loop.
+                    view: envmapTextureViews[i],
+                    loadOp: 'load',
+                    storeOp: 'store',
+                },
+            ],
+            depthStencilAttachment: {
+                view: envmapDepthTexture.createView(),
+                depthLoadOp: 'load',
+                depthStoreOp: 'store',
+            },
+        }})
+
+    const envmapUnlitPipelines = [...Array(2)].map((_, i) => device.createRenderPipeline({
+            label: 'envmapUnlitPipeline',
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [
+                    cameraUniformBufferBindGroupLayout,
+                    lightStorageBufferBindGroupLayout,
+                ],
+            }),
+            vertex: {
+                module: device.createShaderModule({
+                    code: unlitShader,
+                }),
+                entryPoint: 'vertexMain',
+                buffers: unlitVertexBuffersDescritors,
+                constants: {
+                    paraboloid: true,
+                    viewDirection: 1.0 - i * 2,
+                },
+            },
+            fragment: {
+                module: device.createShaderModule({
+                    code: unlitShader,
+                }),
+                entryPoint: 'fragmentMain',
+                targets: [{
+                    format: kEnvmapTextureFormat,
+                }],
+                constants: {
+                    paraboloid: true,
+                },
+            },
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: 'less',
+                format: 'depth24plus',
+            },
+            primitive,
+        }))
 
     // ^^^ 環境マップ関連 ^^^
 
@@ -1291,6 +1348,16 @@ const init = async ({ device, canvas, gui }) => {
                 envmapDeferredRenderingPass.setBindGroup(2, lightStorageBindGroup);
                 envmapDeferredRenderingPass.draw(6);
                 envmapDeferredRenderingPass.end();
+
+                // フォワードレンダリングで点光源の位置に描画してやる
+                const unlitPass = commandEncoder.beginRenderPass(envmapUnlitPassDescriptors[i])
+                unlitPass.setPipeline(envmapUnlitPipelines[i]);
+                unlitPass.setBindGroup(0, envmapCameraBufferBindGroup);
+                unlitPass.setBindGroup(1, lightStorageBindGroup);
+                unlitPass.setVertexBuffer(0, meshForLightVerticesBuffer);
+                unlitPass.setIndexBuffer(meshForLightIndexBuffer, 'uint16');
+                unlitPass.drawIndexed(meshForLightIndexCount, settings.numLights);
+                unlitPass.end();
             }
         }
         {
