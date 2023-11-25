@@ -5,6 +5,7 @@ const GAMMA = 2.2;
 
 override shadowDepthTextureSize: f32 = 1024.0;
 override paraboloid: bool = false;
+override viewDirection: f32 = 1.0;
 
 @group(0) @binding(0) var gBufferNormal: texture_2d<f32>;
 @group(0) @binding(1) var gBufferAlbedo: texture_2d<f32>;
@@ -33,14 +34,21 @@ struct LightInfo {
 @group(3) @binding(0) var envmap: texture_2d_array<f32>;
 @group(3) @binding(1) var envmap_sampler: sampler;
 
-fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
-    // TODO: paraboloid の場合の逆算
-
+fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32, zvalue: f32) -> vec3<f32> {
     // reconstruct world-space position from the screen coordinate.
     let posClip = vec4(coord.x * 2.0 - 1.0, (1.0 - coord.y) * 2.0 - 1.0, depth_sample, 1.0);
-    let posWorldW = camera.invViewProjectionMatrix * posClip;
-    let posWorld = posWorldW.xyz / posWorldW.www;
-    return posWorld;
+    if (paraboloid) {
+        // 放物面逆変換
+        let zv = zvalue * viewDirection;
+        let d = vec3(posClip.xy * (zvalue + 1.0), zv);
+        let shadowZ = posClip.z;
+        let posInView = vec4(d * shadowZ, 1.0);
+        var posWorld = (camera.invViewProjectionMatrix * posInView).xyz;
+        return posWorld;
+    } else {
+        let posWorldW = camera.invViewProjectionMatrix * posClip;
+        return posWorldW.xyz / posWorldW.www;
+    }
 }
 
 struct FragmentInput {
@@ -96,7 +104,9 @@ struct FragmentInfo {
 fn getFragmentInfo(input: FragmentInput, depth: f32) -> FragmentInfo {
     var frag: FragmentInfo;
 
-    frag.normal = textureLoad(gBufferNormal, vec2<i32>(floor(input.coord.xy)), 0).xyz;
+    var normal = textureLoad(gBufferNormal, vec2<i32>(floor(input.coord.xy)), 0);
+    normal.z *= viewDirection;
+    frag.normal = normal.xyz;
     let albedo_reflectivity = textureLoad(gBufferAlbedo, vec2<i32>(floor(input.coord.xy)), 0);
     frag.albedo = albedo_reflectivity.rgb;
     frag.reflectivity = albedo_reflectivity.a;
@@ -104,7 +114,8 @@ fn getFragmentInfo(input: FragmentInput, depth: f32) -> FragmentInfo {
 
     let bufferSize = textureDimensions(gBufferDepth);
     let coordUV = input.coord.xy / vec2<f32>(bufferSize);
-    frag.position = world_from_screen_coord(coordUV, depth);
+    let zvalue = normal.w;  // Gバッファの法線テクスチャのw成分に入れておいたzvalueを取り出す
+    frag.position = world_from_screen_coord(coordUV, depth, zvalue);
 
     return frag;
 }
@@ -151,7 +162,6 @@ fn calcPointLighting(frag: FragmentInfo, light: Light, shadowmapBaseIndex: u32) 
         }
     }
     result.visibility = visibility / 9.0;
-if (paraboloid) { result.visibility = 1.0; }
 
     let diff = light.pos - frag.position;
     let invlen = inverseSqrt(dot(diff, diff));

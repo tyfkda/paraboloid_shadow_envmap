@@ -929,38 +929,39 @@ const init = async ({ device, canvas, gui }) => {
         ],
     });
 
-    const envmapDeferredRenderPipeline = device.createRenderPipeline({
-        label: 'envmapDeferredRenderPipeline',
-        layout: device.createPipelineLayout({
-            bindGroupLayouts: [
-                gBufferTexturesBindGroupLayout,
-                cameraUniformBufferBindGroupLayout,
-                lightStorageBufferBindGroupLayout,
-            ],
-        }),
-        vertex: {
-            module: device.createShaderModule({
-                code: vertexTextureQuad,
+    const envmapDeferredRenderPipelines = [...Array(2)].map((_, i) => device.createRenderPipeline({
+            label: 'envmapDeferredRenderPipeline',
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [
+                    gBufferTexturesBindGroupLayout,
+                    cameraUniformBufferBindGroupLayout,
+                    lightStorageBufferBindGroupLayout,
+                ],
             }),
-            entryPoint: 'main',
-        },
-        fragment: {
-            module: device.createShaderModule({
-                code: fragmentDeferredRendering,
-            }),
-            entryPoint: 'mainWithoutEnvmap',
-            targets: [
-                {
-                    format: kEnvmapTextureFormat,
-                },
-            ],
-            constants: {
-                shadowDepthTextureSize: envmapTextureSize,
-                paraboloid: true,
+            vertex: {
+                module: device.createShaderModule({
+                    code: vertexTextureQuad,
+                }),
+                entryPoint: 'main',
             },
-        },
-        primitive,
-    });
+            fragment: {
+                module: device.createShaderModule({
+                    code: fragmentDeferredRendering,
+                }),
+                entryPoint: 'mainWithoutEnvmap',
+                targets: [
+                    {
+                        format: kEnvmapTextureFormat,
+                    },
+                ],
+                constants: {
+                    shadowDepthTextureSize: envmapTextureSize,
+                    paraboloid: true,
+                    viewDirection: 1.0 - i * 2,
+                },
+            },
+            primitive,
+        }))
 
     const envmapCameraBufferBindGroup = device.createBindGroup({
         label: 'envmapCameraBufferBindGroup',
@@ -1342,7 +1343,7 @@ const init = async ({ device, canvas, gui }) => {
                 // （シャドウマップも使用する）
                 textureQuadPassDescriptor.colorAttachments[0].view = envmapTextureViews[i]
                 const envmapDeferredRenderingPass = commandEncoder.beginRenderPass(textureQuadPassDescriptor)
-                envmapDeferredRenderingPass.setPipeline(envmapDeferredRenderPipeline);
+                envmapDeferredRenderingPass.setPipeline(envmapDeferredRenderPipelines[i]);
                 envmapDeferredRenderingPass.setBindGroup(0, envmapGBufferTexturesBindGroup);
                 envmapDeferredRenderingPass.setBindGroup(1, envmapCameraBufferBindGroup);
                 envmapDeferredRenderingPass.setBindGroup(2, lightStorageBindGroup);

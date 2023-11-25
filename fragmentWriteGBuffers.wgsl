@@ -26,7 +26,7 @@ fn main(
 
     let normal = normalize(fragNormal);
     var output : GBufferOutput;
-    output.normal = vec4(normal, 1.0);
+    output.normal = vec4(normal, zvalue);  // 放物面逆変換用に、wにzvalueを入れておく
     output.albedo = vec4(albedo, reflectivity);
 
     return output;
