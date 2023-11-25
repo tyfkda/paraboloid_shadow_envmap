@@ -1,13 +1,14 @@
-struct Uniforms {
-    modelMatrix : mat4x4<f32>,
-    normalModelMatrix : mat4x4<f32>,
-}
 struct Camera {
     viewProjectionMatrix : mat4x4<f32>,
     invViewProjectionMatrix : mat4x4<f32>,
 }
-@group(0) @binding(0) var<uniform> uniforms : Uniforms;
-@group(0) @binding(1) var<uniform> camera : Camera;
+@group(0) @binding(0) var<uniform> camera : Camera;
+
+struct Model {
+    modelMatrix : mat4x4<f32>,
+    normalModelMatrix : mat4x4<f32>,
+}
+@group(1) @binding(0) var<uniform> model : Model;
 
 struct VertexOutput {
     @builtin(position) Position : vec4<f32>,
@@ -22,9 +23,9 @@ fn main(
     @location(2) uv : vec2<f32>
 ) -> VertexOutput {
     var output : VertexOutput;
-    let worldPosition = (uniforms.modelMatrix * vec4(position, 1.0)).xyz;
+    let worldPosition = (model.modelMatrix * vec4(position, 1.0)).xyz;
     output.Position = camera.viewProjectionMatrix * vec4(worldPosition, 1.0);
-    output.fragNormal = normalize((uniforms.normalModelMatrix * vec4(normal, 0.0)).xyz);
+    output.fragNormal = normalize((model.normalModelMatrix * vec4(normal, 0.0)).xyz);
     output.fragUV = uv;
     return output;
 }

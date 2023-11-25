@@ -1,4 +1,4 @@
-import {mat4, vec3, vec4} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
+import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js'
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh} from './stanford-dragon.js'
 
@@ -43,8 +43,8 @@ class SpotLight {
         this.ry = posNegRand(deg2rad(60), deg2rad(90))
     }
 
-    update(device, sceneUniformBuffer, index, t, aspect) {
-        const offset = (1 * 4 * 16 + 4 * 4 * 2) * index;
+    update(device, lightUniformBuffer, index, t, aspect) {
+        const offset = 16 + (1 * 4 * 16 + 4 * 4 * 2) * index;
 
         const lightPosition = this.lightPosition
 
@@ -69,7 +69,7 @@ class SpotLight {
         // The camera/light aren't moving, so write them into buffers now.
         const lightMatrixData = lightViewProjMatrix;
         device.queue.writeBuffer(
-            sceneUniformBuffer,
+            lightUniformBuffer,
             0 + offset,
             lightMatrixData.buffer,
             lightMatrixData.byteOffset,
@@ -78,7 +78,7 @@ class SpotLight {
 
         const lightData = lightPosition;
         device.queue.writeBuffer(
-            sceneUniformBuffer,
+            lightUniformBuffer,
             64 + offset,
             lightData.buffer,
             lightData.byteOffset,
@@ -87,7 +87,7 @@ class SpotLight {
 
         const lightColor = this.lightColor;
         device.queue.writeBuffer(
-            sceneUniformBuffer,
+            lightUniformBuffer,
             80 + offset,
             lightColor.buffer,
             lightColor.byteOffset,
@@ -172,7 +172,7 @@ const init = async ({ device, canvas, gui }) => {
     }
 
     // GBuffer texture render targets
-    const gBufferTexture2DFloat16 = device.createTexture({
+    const gBufferTextureNormal = device.createTexture({
         size: [canvas.width, canvas.height],
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         format: 'rgba16float',
@@ -219,8 +219,30 @@ const init = async ({ device, canvas, gui }) => {
         cullMode: 'back',
     };
 
+    const uniformBufferBindGroupLayout = device.createBindGroupLayout({
+        label: 'uniformBufferBindGroupLayout',
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                buffer: {
+                    type: 'uniform',
+                },
+            },
+        ],
+    });
+
+    const cameraUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
+    const modelUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
+    const lightUniformBufferBindGroupLayout = uniformBufferBindGroupLayout
+
     const writeGBuffersPipeline = device.createRenderPipeline({
-        layout: 'auto',
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [
+                cameraUniformBufferBindGroupLayout,
+                modelUniformBufferBindGroupLayout,
+            ],
+        }),
         vertex: {
             module: device.createShaderModule({
                 code: vertexWriteGBuffers,
@@ -246,19 +268,6 @@ const init = async ({ device, canvas, gui }) => {
             format: 'depth24plus',
         },
         primitive,
-    });
-
-    const uniformBufferBindGroupLayout = device.createBindGroupLayout({
-        label: 'uniformBufferBindGroupLayout',
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-                buffer: {
-                    type: 'uniform',
-                },
-            },
-        ],
     });
 
     const gBufferTexturesBindGroupLayout = device.createBindGroupLayout({
@@ -303,26 +312,6 @@ const init = async ({ device, canvas, gui }) => {
         ],
     });
 
-    const lightsBufferBindGroupLayout = device.createBindGroupLayout({
-        label: 'lightsBufferBindGroupLayout',
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.FRAGMENT,
-                buffer: {
-                    type: 'uniform',
-                },
-            },
-            {
-                binding: 1,
-                visibility: GPUShaderStage.FRAGMENT,
-                buffer: {
-                    type: 'uniform',
-                },
-            },
-        ],
-    });
-
     const gBuffersDebugViewPipeline = device.createRenderPipeline({
         label: 'gBuffersDebugViewPipeline',
         layout: device.createPipelineLayout({
@@ -357,8 +346,8 @@ const init = async ({ device, canvas, gui }) => {
         layout: device.createPipelineLayout({
             bindGroupLayouts: [
                 gBufferTexturesBindGroupLayout,
-                lightsBufferBindGroupLayout,
-                uniformBufferBindGroupLayout,
+                cameraUniformBufferBindGroupLayout,
+                lightUniformBufferBindGroupLayout,
             ],
         }),
         vertex: {
@@ -413,16 +402,6 @@ const init = async ({ device, canvas, gui }) => {
         mode: 'rendering',
         numLights: 9,
     };
-    const configUniformBuffer = (() => {
-        const buffer = device.createBuffer({
-            size: Uint32Array.BYTES_PER_ELEMENT,
-            mappedAtCreation: true,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-        new Uint32Array(buffer.getMappedRange())[0] = settings.numLights;
-        buffer.unmap();
-        return buffer;
-    })();
 
     gui.add(settings, 'mode', ['rendering', 'gBuffers view']);
     gui
@@ -430,35 +409,41 @@ const init = async ({ device, canvas, gui }) => {
         .step(1)
         .onChange(() => {
             device.queue.writeBuffer(
-                configUniformBuffer,
+                lightUniformBuffer,
                 0,
                 new Uint32Array([settings.numLights])
             );
         });
-
-    const modelUniformBuffer = device.createBuffer({
-        size: 4 * 16 * 2, // two 4x4 matrix
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
 
     const cameraUniformBuffer = device.createBuffer({
         size: 4 * 16 * 2, // two 4x4 matrix
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    const sceneUniformBindGroup = device.createBindGroup({
-        layout: writeGBuffersPipeline.getBindGroupLayout(0),
+    const cameraUniformBindGroup = device.createBindGroup({
+        layout: cameraUniformBufferBindGroupLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: cameraUniformBuffer,
+                },
+            },
+        ],
+    });
+
+    const modelUniformBuffer = device.createBuffer({
+        size: 4 * 16 * 2, // two 4x4 matrix
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const modelUniformBindGroup = device.createBindGroup({
+        layout: modelUniformBufferBindGroupLayout,
         entries: [
             {
                 binding: 0,
                 resource: {
                     buffer: modelUniformBuffer,
-                },
-            },
-            {
-                binding: 1,
-                resource: {
-                    buffer: cameraUniformBuffer,
                 },
             },
         ],
@@ -477,8 +462,8 @@ const init = async ({ device, canvas, gui }) => {
         return device.createRenderPipeline({
             layout: device.createPipelineLayout({
                 bindGroupLayouts: [
-                    uniformBufferBindGroupLayout,
-                    uniformBufferBindGroupLayout,
+                    cameraUniformBufferBindGroupLayout,
+                    modelUniformBufferBindGroupLayout,
                 ],
             }),
             vertex: {
@@ -500,18 +485,6 @@ const init = async ({ device, canvas, gui }) => {
         });
     })
 
-    const modelBindGroup = device.createBindGroup({
-        layout: uniformBufferBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: modelUniformBuffer,
-                },
-            },
-        ],
-    });
-
     const shadowPassDescriptors = [...Array(kMaxNumLights)].map((_, i) => {
         return {
             colorAttachments: [],
@@ -524,22 +497,29 @@ const init = async ({ device, canvas, gui }) => {
         };
     })
 
-    const sceneUniformBuffer = device.createBuffer({
-        // One 4x4 viewProj matrices for the light.
-        // Then a vec3 for the light position.
-        // Then a vec3 for the light color.
+    const lightUniformBuffer = device.createBuffer({
+        // Number of light.
+        // For kMaxNumLights:
+        //     One 4x4 viewProj matrices for the light.
+        //     Then a vec3 for the light position.
+        //     Then a vec3 for the light color.
         // Rounded to the nearest multiple of 16.
-        size: (1 * 4 * 16 + 4 * 4 * 2) * kMaxNumLights,
+        size: 16 + (1 * 4 * 16 + 4 * 4 * 2) * kMaxNumLights,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+    device.queue.writeBuffer(
+        lightUniformBuffer,
+        0,
+        new Uint32Array([settings.numLights])
+    );
 
-    const sceneBindGroupForShadow = device.createBindGroup({
-        layout: uniformBufferBindGroupLayout,
+    const lightUniformBindGroup = device.createBindGroup({
+        layout: lightUniformBufferBindGroupLayout,
         entries: [
             {
                 binding: 0,
                 resource: {
-                    buffer: sceneUniformBuffer,
+                    buffer: lightUniformBuffer,
                 },
             },
         ],
@@ -548,7 +528,7 @@ const init = async ({ device, canvas, gui }) => {
     // ^^^ シャドウマップ関連 ^^^
 
     const gBufferTextureViews = [
-        gBufferTexture2DFloat16.createView(),
+        gBufferTextureNormal.createView(),
         gBufferTextureAlbedo.createView(),
         depthTexture.createView(),
         shadowDepthTexture.createView(),
@@ -604,25 +584,6 @@ const init = async ({ device, canvas, gui }) => {
                 resource: device.createSampler({
                     compare: 'less',
                 })
-            },
-        ],
-    });
-
-    const lightsBufferBindGroup = device.createBindGroup({
-        label: 'lightsBufferBindGroup',
-        layout: lightsBufferBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: configUniformBuffer,
-                },
-            },
-            {
-                binding: 1,
-                resource: {
-                    buffer: cameraUniformBuffer,
-                },
             },
         ],
     });
@@ -717,7 +678,7 @@ const init = async ({ device, canvas, gui }) => {
 
         for (let i = 0; i < settings.numLights; ++i) {
             const spotLight = spotLights[i]
-            spotLight.update(device, sceneUniformBuffer, i, t, aspect)
+            spotLight.update(device, lightUniformBuffer, i, t, aspect)
         }
 
         const commandEncoder = device.createCommandEncoder();
@@ -727,7 +688,8 @@ const init = async ({ device, canvas, gui }) => {
                 writeGBufferPassDescriptor
             );
             gBufferPass.setPipeline(writeGBuffersPipeline);
-            gBufferPass.setBindGroup(0, sceneUniformBindGroup);
+            gBufferPass.setBindGroup(0, cameraUniformBindGroup);
+            gBufferPass.setBindGroup(1, modelUniformBindGroup);
             gBufferPass.setVertexBuffer(0, vertexBuffer);
             gBufferPass.setIndexBuffer(indexBuffer, 'uint16');
             gBufferPass.drawIndexed(indexCount);
@@ -738,8 +700,8 @@ const init = async ({ device, canvas, gui }) => {
             for (let i = 0; i < settings.numLights; ++i) {
                 const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
                 shadowPass.setPipeline(shadowPipelines[i]);
-                shadowPass.setBindGroup(0, sceneBindGroupForShadow);
-                shadowPass.setBindGroup(1, modelBindGroup);
+                shadowPass.setBindGroup(0, lightUniformBindGroup);
+                shadowPass.setBindGroup(1, modelUniformBindGroup);
                 shadowPass.setVertexBuffer(0, vertexBuffer);
                 shadowPass.setIndexBuffer(indexBuffer, 'uint16');
                 shadowPass.drawIndexed(indexCount);
@@ -766,8 +728,8 @@ const init = async ({ device, canvas, gui }) => {
                 const deferredRenderingPass = commandEncoder.beginRenderPass(textureQuadPassDescriptor)
                 deferredRenderingPass.setPipeline(deferredRenderPipeline);
                 deferredRenderingPass.setBindGroup(0, gBufferTexturesBindGroup);
-                deferredRenderingPass.setBindGroup(1, lightsBufferBindGroup);
-                deferredRenderingPass.setBindGroup(2, sceneBindGroupForShadow);
+                deferredRenderingPass.setBindGroup(1, cameraUniformBindGroup);
+                deferredRenderingPass.setBindGroup(2, lightUniformBindGroup);
                 deferredRenderingPass.draw(6);
                 deferredRenderingPass.end();
             }

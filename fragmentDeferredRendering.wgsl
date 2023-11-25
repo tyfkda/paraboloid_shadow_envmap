@@ -11,23 +11,22 @@ override shadowDepthTextureSize: f32 = 256.0;
 @group(0) @binding(3) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
 
-struct Config {
-    numLights : u32,
-}
 struct Camera {
     viewProjectionMatrix : mat4x4<f32>,
     invViewProjectionMatrix : mat4x4<f32>,
 }
-@group(1) @binding(0) var<uniform> config: Config;
-@group(1) @binding(1) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 struct Light {
     viewProjMatrix: mat4x4<f32>,
     pos: vec3<f32>,
     color: vec3<f32>,
 }
-
-@group(2) @binding(0) var<uniform> lights : array<Light, kMaxNumLights>;
+struct LightInfo {
+    numLights : u32,
+    lights: array<Light, kMaxNumLights>,
+}
+@group(2) @binding(0) var<uniform> light_info : LightInfo;
 
 fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
     // reconstruct world-space position from the screen coordinate.
@@ -69,8 +68,8 @@ fn main(
     let position = world_from_screen_coord(coordUV, depth);
 
     var total : vec3<f32> = vec3(0, 0, 0);
-    for (var lightIndex = 0u; lightIndex < config.numLights; lightIndex += 1) {
-        let light = lights[lightIndex];
+    for (var lightIndex = 0u; lightIndex < light_info.numLights; lightIndex += 1) {
+        let light = light_info.lights[lightIndex];
 
         // XY is in (-1, 1) space, Z is in (0, 1) space
         let posFromLight0 = light.viewProjMatrix * vec4(position, 1.0);
