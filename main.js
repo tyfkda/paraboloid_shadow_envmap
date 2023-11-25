@@ -445,7 +445,7 @@ const init = async ({ device, canvas, gui }) => {
     });
 
     const modelUniformBuffer = device.createBuffer({
-        size: 4 * 16 * 2, // two 4x4 matrix
+        size: 4 * 16 * 1, // one 4x4 matrix
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -634,16 +634,6 @@ const init = async ({ device, canvas, gui }) => {
         modelData.buffer,
         modelData.byteOffset,
         modelData.byteLength
-    );
-    const invertTransposeModelMatrix = mat4.invert(modelMatrix);
-    mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
-    const normalModelData = invertTransposeModelMatrix;
-    device.queue.writeBuffer(
-        modelUniformBuffer,
-        64,
-        normalModelData.buffer,
-        normalModelData.byteOffset,
-        normalModelData.byteLength
     );
 
     // Rotates the camera around the origin based on time.

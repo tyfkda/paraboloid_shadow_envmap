@@ -6,7 +6,6 @@ struct Camera {
 
 struct Model {
     modelMatrix : mat4x4<f32>,
-    normalModelMatrix : mat4x4<f32>,
 }
 @group(1) @binding(0) var<uniform> model : Model;
 
@@ -25,7 +24,7 @@ fn main(
     var output : VertexOutput;
     let worldPosition = (model.modelMatrix * vec4(position, 1.0)).xyz;
     output.Position = camera.viewProjectionMatrix * vec4(worldPosition, 1.0);
-    output.fragNormal = normalize((model.normalModelMatrix * vec4(normal, 0.0)).xyz);
+    output.fragNormal = normalize((model.modelMatrix * vec4(normal, 0.0)).xyz);
     output.fragUV = uv;
     return output;
 }
