@@ -2,7 +2,7 @@ import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh as dragonMeshData} from './stanford-dragon.js'
 import {mesh as backgroundMeshData} from './background.js'
-import {createSphere} from './utils.js'
+import {createCube, createSphere, createTorus} from './utils.js'
 
 const kMaxNumLights = 32;
 const kMaxShadowPasses = kMaxNumLights * 2;  // 点光源用、双放物面で２倍必要
@@ -172,9 +172,42 @@ class Mesh {
 }
 
 class GameObject {
-    constructor(_device, mesh, material) {
+    constructor(device, mesh, material, bindGroupLayout) {
         this.mesh = mesh;
         this.material = material;
+
+        this.uniformBuffer = device.createBuffer({
+            size: 4 * 16 * 1, // one 4x4 matrix
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        this.uniformBindGroup = device.createBindGroup({
+            layout: bindGroupLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: this.uniformBuffer,
+                    },
+                },
+            ],
+        });
+
+        this.setMatrix(device, mat4.identity())
+    }
+
+    setMesh(mesh) {
+        this.mesh = mesh
+    }
+
+    setMatrix(device, matrix) {
+        device.queue.writeBuffer(
+            this.uniformBuffer,
+            0,
+            matrix.buffer,
+            matrix.byteOffset,
+            matrix.byteLength
+        );
     }
 }
 
@@ -528,16 +561,29 @@ const init = async ({ device, canvas, gui }) => {
         ],
     };
 
-    const MODE_RENDERING = 'rendering'
+    const MODE_DRAGON = 'Dragon'
+    const MODE_CUBE = 'Cube'
+    const MODE_SPHERE = 'Sphere'
+    const MODE_TORUS = 'Torus'
     const MODE_GBUFFER = 'gBuffers view'
 
     const settings = {
-        mode: MODE_RENDERING,
+        mode: MODE_DRAGON,
         reflectivity: 1.0,
         numLights: 10,
+        rotateModel: false,
     };
 
-    gui.add(settings, 'mode', [MODE_RENDERING, MODE_GBUFFER])
+    gui
+        .add(settings, 'mode', [MODE_DRAGON, MODE_CUBE, MODE_SPHERE, MODE_TORUS, MODE_GBUFFER])
+        .onChange(() => {
+            let mesh = meshes[settings.mode]
+            if (mesh != null) {
+                dragonObject.setMesh(mesh)
+                dragonObject.setMatrix(device, mat4.translation(modelPosition))
+                vec3.set(0.0, 0.0, 0.0, modelRotation)
+            }
+        })
     gui
         .add(settings, 'reflectivity', 0.0, 1.0)
         .step(0.01)
@@ -554,15 +600,33 @@ const init = async ({ device, canvas, gui }) => {
                 new Uint32Array([settings.numLights])
             );
         });
+    gui.add(settings, 'rotateModel')
 
     const materialUniformLayoutGroup = writeGBuffersPipeline.getBindGroupLayout(1)
     const blinnPhongMaterial = new Material(device, [1.0, 1.0, 1.0], 0.0, materialUniformLayoutGroup)
     const mirrorMaterial = new Material(device, [1.0, 1.0, 1.0], settings.reflectivity, materialUniformLayoutGroup)
 
+    const dragonMesh = new Mesh(device, dragonMeshData)
+    const cubeMesh = new Mesh(device, createCube(20.0, 16))
+    const sphereMesh = new Mesh(device, createSphere(25.0, 64, 32))
+    const torusMesh = new Mesh(device, createTorus(25.0, 8.0, 64, 32))
+    const meshes = {
+        [MODE_DRAGON]: dragonMesh,
+        [MODE_CUBE]: cubeMesh,
+        [MODE_SPHERE]: sphereMesh,
+        [MODE_TORUS]: torusMesh,
+    }
+
     // Create the model vertex buffer.
-    const dragonObject = new GameObject(device, new Mesh(device, dragonMeshData), mirrorMaterial)
-    const backgroundObject = new GameObject(device, new Mesh(device, backgroundMeshData), blinnPhongMaterial)
+    const dragonObject = new GameObject(device, meshes[settings.mode], mirrorMaterial, modelUniformBufferBindGroupLayout)
+    const backgroundObject = new GameObject(device, new Mesh(device, backgroundMeshData), blinnPhongMaterial, modelUniformBufferBindGroupLayout)
     const sceneGameObjects = [dragonObject, backgroundObject]
+
+
+    // Move the model so it's centered.
+    const modelPosition = vec3.fromValues(0, 20, 0);
+    dragonObject.setMatrix(device, mat4.translation(modelPosition))
+    backgroundObject.setMatrix(device, mat4.translation([0, -45, 0]))
 
     const cameraUniformBuffer = device.createBuffer({
         size: 4 * 16 * 2 + 4 * 4, // two 4x4 matrix + one vec3
@@ -576,23 +640,6 @@ const init = async ({ device, canvas, gui }) => {
                 binding: 0,
                 resource: {
                     buffer: cameraUniformBuffer,
-                },
-            },
-        ],
-    });
-
-    const modelUniformBuffer = device.createBuffer({
-        size: 4 * 16 * 1, // one 4x4 matrix
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    const modelUniformBindGroup = device.createBindGroup({
-        layout: modelUniformBufferBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: modelUniformBuffer,
                 },
             },
         ],
@@ -1184,18 +1231,6 @@ const init = async ({ device, canvas, gui }) => {
         2000.0
     );
 
-    // Move the model so it's centered.
-    const modelMatrix = mat4.translation([0, -45, 0]);
-
-    const modelData = modelMatrix;
-    device.queue.writeBuffer(
-        modelUniformBuffer,
-        0,
-        modelData.buffer,
-        modelData.byteOffset,
-        modelData.byteLength
-    );
-
     // Rotates the camera around the origin based on time.
     function getCameraViewMatrix(t) {
         const rad = t * (Math.PI / 20);
@@ -1210,10 +1245,16 @@ const init = async ({ device, canvas, gui }) => {
         };
     }
 
+    const modelRotation = vec3.fromValues(0.0, 0.0, 0.0)
+    let lastTime = Date.now()
+
     function frame() {
         // Sample is no longer the active page.
 
         const t = Date.now() * (1 / 1000);
+        const elapsedTime = t - lastTime
+        lastTime = t
+
         {
             const {viewMatrix, position} = getCameraViewMatrix(t);
             {
@@ -1289,20 +1330,17 @@ const init = async ({ device, canvas, gui }) => {
             }
         }
 
-        {
-            const modelData = modelMatrix;
-            device.queue.writeBuffer(
-                modelUniformBuffer,
-                0,
-                modelData.buffer,
-                modelData.byteOffset,
-                modelData.byteLength
-            );
-        }
-
         for (let i = 0; i < settings.numLights; ++i) {
             const pointLight = pointLights[i]
             pointLight.update(device, lightStorageBuffer, i, t)
+        }
+
+        if (settings.rotateModel) {
+            modelRotation[0] += deg2rad(10) * elapsedTime
+            modelRotation[1] += deg2rad(15) * elapsedTime
+            modelRotation[2] += deg2rad(25) * elapsedTime
+            const matrix = mat4.rotateY(mat4.rotateX(mat4.rotateZ(mat4.translation(modelPosition), modelRotation[2]), modelRotation[0]), modelRotation[1])
+            dragonObject.setMatrix(device, matrix)
         }
 
         const commandEncoder = device.createCommandEncoder();
@@ -1312,9 +1350,9 @@ const init = async ({ device, canvas, gui }) => {
                 const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
                 shadowPass.setPipeline(shadowPipelines[i & 1]);
                 shadowPass.setBindGroup(0, lightStorageBindGroup);
-                shadowPass.setBindGroup(1, modelUniformBindGroup);
                 shadowPass.setBindGroup(2, shadowUniformBindGroups[i >> 1])
                 for (const go of sceneGameObjects) {
+                    shadowPass.setBindGroup(1, go.uniformBindGroup);
                     shadowPass.setVertexBuffer(0, go.mesh.vertexBuffer);
                     shadowPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
                     shadowPass.drawIndexed(go.mesh.indexCount);
@@ -1328,10 +1366,10 @@ const init = async ({ device, canvas, gui }) => {
                 const envmapGBufferPass = commandEncoder.beginRenderPass(writeEnvmapGBufferPassDescriptor);
                 envmapGBufferPass.setPipeline(writeEnvmapGBuffersPipelines[i]);
                 envmapGBufferPass.setBindGroup(0, envmapCameraUniformBindGroup);
-                envmapGBufferPass.setBindGroup(1, modelUniformBindGroup);
                 for (const go of sceneGameObjects) {
                     if (go === dragonObject)
                         continue
+                    envmapGBufferPass.setBindGroup(1, go.uniformBindGroup);
                     envmapGBufferPass.setBindGroup(2, go.material.uniformBindGroup);
                     envmapGBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
                     envmapGBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');
@@ -1365,9 +1403,9 @@ const init = async ({ device, canvas, gui }) => {
             const gBufferPass = commandEncoder.beginRenderPass(writeGBufferPassDescriptor);
             gBufferPass.setPipeline(writeGBuffersPipeline);
             gBufferPass.setBindGroup(0, cameraUniformBindGroup);
-            gBufferPass.setBindGroup(1, modelUniformBindGroup);
             for (const go of sceneGameObjects) {
                 // Write position, normal, albedo etc. data to gBuffers
+                gBufferPass.setBindGroup(1, go.uniformBindGroup);
                 gBufferPass.setBindGroup(2, go.material.uniformBindGroup);
                 gBufferPass.setVertexBuffer(0, go.mesh.vertexBuffer);
                 gBufferPass.setIndexBuffer(go.mesh.indexBuffer, 'uint16');

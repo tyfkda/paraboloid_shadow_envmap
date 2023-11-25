@@ -10,6 +10,10 @@ export const mesh = {
     colors: [] /*as [number, number, number][]*/,
 }
 
+// Tweak poistions to match object center.
+for (let i = 0; i < mesh.positions.length; ++i)
+    mesh.positions[i][1] -= 63
+
 // Compute surface normals
 mesh.normals = computeSurfaceNormals(mesh.positions, mesh.triangles)
 
