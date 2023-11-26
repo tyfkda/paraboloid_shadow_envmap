@@ -470,31 +470,27 @@ const init = async ({ device, canvas, gui }) => {
         format: 'depth32float',
     });
 
-    const shadowPipelines = [...Array(kMaxNumLights)].map((_, i) => {
-        return device.createRenderPipeline({
-            layout: device.createPipelineLayout({
-                bindGroupLayouts: [
-                    lightStorageBufferBindGroupLayout,
-                    modelUniformBufferBindGroupLayout,
-                ],
+    const shadowPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [
+                lightStorageBufferBindGroupLayout,
+                modelUniformBufferBindGroupLayout,
+                uniformBufferBindGroupLayout,
+            ],
+        }),
+        vertex: {
+            module: device.createShaderModule({
+                code: vertexShadow,
             }),
-            vertex: {
-                module: device.createShaderModule({
-                    code: vertexShadow,
-                }),
-                entryPoint: 'main',
-                buffers: vertexBuffers,
-                constants: {
-                    lightIndex: i,
-                },
-            },
-            depthStencil: {
-                depthWriteEnabled: true,
-                depthCompare: 'less',
-                format: 'depth32float',
-            },
-            primitive,
-        });
+            entryPoint: 'main',
+            buffers: vertexBuffers,
+        },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth32float',
+        },
+        primitive,
     })
 
     const shadowPassDescriptors = [...Array(kMaxNumLights)].map((_, i) => {
@@ -536,6 +532,31 @@ const init = async ({ device, canvas, gui }) => {
             },
         ],
     });
+
+    const shadowUniformBindGroups = [...Array(kMaxNumLights)].map((_, i) => {
+        const uniformBuffer = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM,
+            mappedAtCreation: true,
+        });
+        {
+            const mapping = new Uint32Array(uniformBuffer.getMappedRange());
+            mapping[0] = i
+            uniformBuffer.unmap();
+        }
+
+        return device.createBindGroup({
+            layout: uniformBufferBindGroupLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: uniformBuffer,
+                    },
+                },
+            ],
+        });
+    })
 
     // ^^^ シャドウマップ関連 ^^^
 
@@ -685,6 +706,20 @@ const init = async ({ device, canvas, gui }) => {
 
         const commandEncoder = device.createCommandEncoder();
         {
+            // 各光源からのシャドウマップを作成
+            for (let i = 0; i < settings.numLights; ++i) {
+                const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
+                shadowPass.setPipeline(shadowPipeline);
+                shadowPass.setBindGroup(0, lightStorageBindGroup);
+                shadowPass.setBindGroup(1, modelUniformBindGroup);
+                shadowPass.setBindGroup(2, shadowUniformBindGroups[i])
+                shadowPass.setVertexBuffer(0, vertexBuffer);
+                shadowPass.setIndexBuffer(indexBuffer, 'uint16');
+                shadowPass.drawIndexed(indexCount);
+                shadowPass.end();
+            }
+        }
+        {
             // Write position, normal, albedo etc. data to gBuffers
             const gBufferPass = commandEncoder.beginRenderPass(
                 writeGBufferPassDescriptor
@@ -698,18 +733,6 @@ const init = async ({ device, canvas, gui }) => {
             gBufferPass.end();
         }
         {
-            //シャドウマップの描画
-            for (let i = 0; i < settings.numLights; ++i) {
-                const shadowPass = commandEncoder.beginRenderPass(shadowPassDescriptors[i]);
-                shadowPass.setPipeline(shadowPipelines[i]);
-                shadowPass.setBindGroup(0, lightStorageBindGroup);
-                shadowPass.setBindGroup(1, modelUniformBindGroup);
-                shadowPass.setVertexBuffer(0, vertexBuffer);
-                shadowPass.setIndexBuffer(indexBuffer, 'uint16');
-                shadowPass.drawIndexed(indexCount);
-                shadowPass.end();
-            }
-
             if (settings.mode === 'gBuffers view') {
                 // GBuffers debug view
                 // Left: depth

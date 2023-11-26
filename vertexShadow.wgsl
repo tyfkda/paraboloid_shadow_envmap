@@ -1,7 +1,5 @@
 const kMaxNumLights = 64;
 
-override lightIndex: u32 = 0;
-
 struct Light {
     viewProjMatrix: mat4x4<f32>,
     pos: vec3<f32>,
@@ -18,10 +16,12 @@ struct Model {
 }
 @group(1) @binding(0) var<uniform> model : Model;
 
+@group(2) @binding(0) var<uniform> light_index : u32;
+
 @vertex
 fn main(
     @location(0) position: vec3<f32>
 ) -> @builtin(position) vec4<f32> {
-    let light = light_info.lights[lightIndex];
+    let light = light_info.lights[light_index];
     return light.viewProjMatrix * model.modelMatrix * vec4(position, 1.0);
 }
