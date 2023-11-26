@@ -36,68 +36,42 @@ function shuffle(array) {
     return array
 }
 
-class PointLight {
-    constructor(lightColor) {
-        this.lightColor = lightColor
+function initPointLight(lightColor, index, device, lightStorageBuffer) {
+    const r = randomRange(30, 180)
+    const ry = randomRange(10, 40)
+    const tx = posNegRand(deg2rad(10), deg2rad(40))
+    const ty = posNegRand(deg2rad(10), deg2rad(40))
+    const tz = posNegRand(deg2rad(10), deg2rad(40))
 
-        this.r = randomRange(30, 180)
-        this.ry = randomRange(10, 40)
-        this.tx = posNegRand(deg2rad(10), deg2rad(40))
-        this.ty = posNegRand(deg2rad(10), deg2rad(40))
-        this.tz = posNegRand(deg2rad(10), deg2rad(40))
-        this.position = vec3.create()
-    }
+    const offset = 16 + (16 * (3 + 4 + 1)) * index;
 
-    update(device, lightStorageBuffer, index, t) {
-        const offset = 16 + (1 * 4 * 16 + 4 * 4 * 2) * index;
+    device.queue.writeBuffer(
+        lightStorageBuffer,
+        16 * 0 + offset,
+        lightColor.buffer,
+        lightColor.byteOffset,
+        lightColor.byteLength
+    );
 
-        const lightPosition = vec3.set(Math.sin(this.tx * t) * this.r, 35 + this.ry * Math.sin(this.ty * t), Math.cos(this.tz * t) * this.r, this.position);
+    const far = 400 * 2
 
-        // const panMatrix = mat4.rotateY(
-        //     mat4.rotateX(mat4.identity(), Math.sin(t * this.rx) * deg2rad(15)),
-        //     Math.sin(t * this.ry) * deg2rad(15))
+    const param = vec3.fromValues(r, ry, far)
+    device.queue.writeBuffer(
+        lightStorageBuffer,
+        16 * 1 + offset,
+        param.buffer,
+        param.byteOffset,
+        param.byteLength
+    );
 
-        const lightViewMatrix = mat4.lookAt(lightPosition, origin, upVector);
-        let lightProjectionMatrix = (() => {
-            const far = 400 * 2
-            const invfar = 1.0 / far
-            return mat4.create(
-                invfar, 0.0,  0.0, 0.0,
-                0.0, invfar,  0.0, 0.0,
-                0.0, 0.0, -invfar, 0.0,
-                0.0, 0.0,  0.0, 1.0)
-        })();
-
-        const lightViewProjMatrix = mat4.multiply(lightProjectionMatrix, lightViewMatrix)
-
-        // The camera/light aren't moving, so write them into buffers now.
-        const lightMatrixData = lightViewProjMatrix;
-        device.queue.writeBuffer(
-            lightStorageBuffer,
-            0 + offset,
-            lightMatrixData.buffer,
-            lightMatrixData.byteOffset,
-            lightMatrixData.byteLength
-        );
-
-        const lightData = lightPosition;
-        device.queue.writeBuffer(
-            lightStorageBuffer,
-            64 + offset,
-            lightData.buffer,
-            lightData.byteOffset,
-            lightData.byteLength
-        );
-
-        const lightColor = this.lightColor;
-        device.queue.writeBuffer(
-            lightStorageBuffer,
-            80 + offset,
-            lightColor.buffer,
-            lightColor.byteOffset,
-            lightColor.byteLength
-        );
-    }
+    const rotSpeed = vec3.fromValues(tx, ty, tz)
+    device.queue.writeBuffer(
+        lightStorageBuffer,
+        16 * 2 + offset,
+        rotSpeed.buffer,
+        rotSpeed.byteOffset,
+        rotSpeed.byteLength
+    );
 }
 
 class Material {
@@ -232,6 +206,7 @@ const init = async ({ device, canvas, gui }) => {
     let fragmentDeferredRendering
     let shadowGenShader
     let unlitShader
+    let computeLightUpdateShader
 
     await Promise.all([
         fetch('./vertexWriteGBuffers.wgsl').then((r) => r.text()).then((r) => vertexWriteGBuffers = r),
@@ -241,6 +216,7 @@ const init = async ({ device, canvas, gui }) => {
         fetch('./fragmentDeferredRendering.wgsl').then((r) => r.text()).then((r) => fragmentDeferredRendering = r),
         fetch('./shadowGen.wgsl').then((r) => r.text()).then((r) => shadowGenShader = r),
         fetch('./unlit.wgsl').then((r) => r.text()).then((r) => unlitShader = r),
+        fetch('./computeLightUpdate.wgsl').then((r) => r.text()).then((r) => computeLightUpdateShader = r),
     ])
 
     const devicePixelRatio = window.devicePixelRatio || 1;
@@ -708,11 +684,13 @@ const init = async ({ device, canvas, gui }) => {
     const lightStorageBuffer = device.createBuffer({
         // Number of light.
         // For kMaxNumLights:
-        //     One 4x4 viewProj matrices for the light.
-        //     Then a vec3 for the light position.
-        //     Then a vec3 for the light color.
+        //     color: vec3
+        //     param: vec4
+        //     rotSpeed: vec3
+        //     viewProjMatrix: mat4x4
+        //     pos: vec3
         // Rounded to the nearest multiple of 16.
-        size: 16 + (1 * 4 * 16 + 4 * 4 * 2) * kMaxNumLights,
+        size: 16 + (16 * (3 + 4 + 1)) * kMaxNumLights,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(
@@ -759,6 +737,44 @@ const init = async ({ device, canvas, gui }) => {
     })
 
     // ^^^ シャドウマップ関連 ^^^
+
+    // VVV ライト更新関連 VVV
+
+    const lightUpdateInfoUniformBuffer = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const lightUpdatePipeline = device.createComputePipeline({
+        label: 'lightUpdatePipeline',
+        layout: 'auto',
+        compute: {
+            module: device.createShaderModule({
+                label: 'computeLightUpdateShaderModule',
+                code: computeLightUpdateShader,
+            }),
+            entryPoint: 'main',
+        },
+    })
+
+    const lightUpdateBindGroup = device.createBindGroup({
+            label: 'lightUpdateBindGroup',
+            layout: lightUpdatePipeline.getBindGroupLayout(0),
+            entries: [
+                {
+                    binding: 0,
+                    resource: { buffer: lightStorageBuffer },
+                },
+                {
+                    binding: 1,
+                    resource: { buffer: lightUpdateInfoUniformBuffer },
+                },
+            ],
+        })
+
+    const workgroupCount = {x: 1, y: 1}
+
+    // ^^^ ライト更新関連 ^^^
 
     // VVV unlit関連 VVV
 
@@ -1211,12 +1227,11 @@ const init = async ({ device, canvas, gui }) => {
         vec3.fromValues(0.0, 0.0, 1.0),
     ])
     const intensity = 10000
-    const pointLights = [...Array(kMaxNumLights)].map((_, i) => {
+    for (let i = 0; i < kMaxNumLights; ++i) {
         const color = i === 0 ? vec3.scale([1.0, 1.0, 1.0], intensity * 4)
                               : vec3.scale(colors[i % colors.length], intensity)
-        return new PointLight(color)
-    })
-
+        initPointLight(color, i, device, lightStorageBuffer)
+    }
 
 
     //--------------------
@@ -1246,14 +1261,16 @@ const init = async ({ device, canvas, gui }) => {
     }
 
     const modelRotation = vec3.fromValues(0.0, 0.0, 0.0)
-    let lastTime = Date.now()
+    const startTime = Date.now() - 10000
+    let lastTime = 10.0
 
     function frame() {
         // Sample is no longer the active page.
 
-        const t = Date.now() * (1 / 1000);
-        const elapsedTime = t - lastTime
-        lastTime = t
+        const now = Date.now() - startTime
+        const t = now * (1 / 1000)
+        const elapsedTime = (now - lastTime) * (1 / 1000)
+        lastTime = now
 
         {
             const {viewMatrix, position} = getCameraViewMatrix(t);
@@ -1330,9 +1347,22 @@ const init = async ({ device, canvas, gui }) => {
             }
         }
 
-        for (let i = 0; i < settings.numLights; ++i) {
-            const pointLight = pointLights[i]
-            pointLight.update(device, lightStorageBuffer, i, t)
+        {
+            const WORKGROUP_SIZE = 8
+
+            workgroupCount.x = Math.ceil(Math.sqrt(settings.numLights / (WORKGROUP_SIZE * WORKGROUP_SIZE)))
+            workgroupCount.y = Math.ceil((settings.numLights / (WORKGROUP_SIZE * WORKGROUP_SIZE)) / workgroupCount.x)
+
+            const buffer = new ArrayBuffer(16)
+            const p1 = new Float32Array(buffer, 0, 1)  // nowInSeconds
+            p1[0] = t
+            const p2 = new Uint32Array(buffer, 4, 1)   // workgroupWidth
+            p2[0] = workgroupCount.x * WORKGROUP_SIZE
+
+            device.queue.writeBuffer(
+                lightUpdateInfoUniformBuffer,
+                0,
+                buffer, 0, buffer.byteLength)
         }
 
         if (settings.rotateModel) {
@@ -1344,6 +1374,15 @@ const init = async ({ device, canvas, gui }) => {
         }
 
         const commandEncoder = device.createCommandEncoder();
+
+        {
+            const computePass = commandEncoder.beginComputePass()
+            computePass.setPipeline(lightUpdatePipeline)
+            computePass.setBindGroup(0, lightUpdateBindGroup)
+            computePass.dispatchWorkgroups(workgroupCount.x, workgroupCount.y)
+            computePass.end()
+        }
+
         {
             // 各光源からのシャドウマップを作成（光源ごとに前後２枚）
             for (let i = 0; i < settings.numLights * 2; ++i) {

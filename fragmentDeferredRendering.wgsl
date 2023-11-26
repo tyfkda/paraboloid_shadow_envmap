@@ -21,9 +21,14 @@ struct Camera {
 @group(1) @binding(0) var<uniform> camera: Camera;
 
 struct Light {
+    // Parameters.
+    color: vec3<f32>,
+    param: vec4<f32>,  // radius-xz, radius-y
+    rotSpeed: vec3<f32>,
+
+    // Output:
     viewProjMatrix: mat4x4<f32>,
     pos: vec3<f32>,
-    color: vec3<f32>,
 }
 struct LightInfo {
     numLights : u32,
