@@ -1237,7 +1237,8 @@ const init = async ({ device, canvas, gui }) => {
     //--------------------
 
     // Scene matrices
-    const eyePosition = vec3.fromValues(0, 50, -100);
+    const eyeTarget = vec3.fromValues(0, 50, 0)
+    const eyeDistance = vec3.fromValues(0, 0, 100)
 
     const projectionMatrix = mat4.perspective(
         (2 * Math.PI) / 5,
@@ -1250,8 +1251,8 @@ const init = async ({ device, canvas, gui }) => {
     function getCameraViewMatrix(t) {
         const rad = t * (Math.PI / 20);
         const radX = Math.sin(t * (Math.PI / 13)) * (Math.PI / 8);
-        const rotation = mat4.rotateX(mat4.rotateY(mat4.translation(origin), rad), radX);
-        const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
+        const rotation = mat4.rotateX(mat4.rotateY(mat4.translation(eyeTarget), rad), radX)
+        const rotatedEyePosition = vec3.transformMat4(eyeDistance, rotation)
 
         const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
         return {
@@ -1497,23 +1498,18 @@ const init = async ({ device, canvas, gui }) => {
         requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
+
+    document.body.addEventListener('mousewheel', event => {
+        event.preventDefault()
+        const z = eyeDistance[2] + eyeDistance[2] * event.deltaY * 0.001
+        eyeDistance[2] = Math.max(30, Math.min(200, z))
+        eyeTarget[1] = eyeDistance[2] * (50 / 100)
+    }, {passive: false})
 };
 
 function notSupported() {
     const notSupported = document.getElementById('not-supported')
     notSupported.style.display = null  // デフォルト 'none' を削除して、表示する
-}
-
-function getUrlQueries() {
-    const queryStr = window.location.search.slice(1)  // 文頭?を除外
-    const queries = {}
-    if (queryStr !== '') {
-        queryStr.split('&').forEach((queryStr) => {
-            var queryArr = queryStr.split('=')
-            queries[queryArr[0]] = queryArr[1]
-        })
-    }
-    return queries
 }
 
 async function main() {
@@ -1523,28 +1519,13 @@ async function main() {
         return
     }
 
-    const run = async () => {
-        const canvas = document.createElement('canvas')
-        canvas.style.width = canvas.style.height = '100%'
-        document.body.appendChild(canvas)
+    const canvas = document.createElement('canvas')
+    canvas.style.width = canvas.style.height = '100%'
+    document.body.appendChild(canvas)
 
-        const gui = new dat.GUI();
+    const gui = new dat.GUI();
 
-        await init({device, canvas, gui})
-    }
-
-    // クエリ文字列で自動実行も可能にする
-    const queries = getUrlQueries()
-    if (queries.wait) {
-        const ready = document.getElementById('ready')
-        ready.style.display = null  // デフォルト 'none' を削除して、表示する
-        ready.addEventListener('click', async () => {
-            ready.style.display = 'none'  // 再度非表示に
-            await run()
-        })
-    } else {
-        await run()
-    }
+    await init({device, canvas, gui})
 }
 
 await main()
