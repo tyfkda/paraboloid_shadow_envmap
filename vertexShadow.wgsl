@@ -11,7 +11,7 @@ struct LightInfo {
     numLights : u32,
     lights: array<Light, kMaxNumLights>,
 }
-@group(0) @binding(0) var<uniform> light_info : LightInfo;
+@group(0) @binding(0) var<storage, read> light_info : LightInfo;
 
 struct Model {
     modelMatrix: mat4x4<f32>,

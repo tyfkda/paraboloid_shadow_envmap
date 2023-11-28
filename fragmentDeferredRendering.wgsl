@@ -26,7 +26,7 @@ struct LightInfo {
     numLights : u32,
     lights: array<Light, kMaxNumLights>,
 }
-@group(2) @binding(0) var<uniform> light_info : LightInfo;
+@group(2) @binding(0) var<storage, read> light_info : LightInfo;
 
 fn world_from_screen_coord(coord : vec2<f32>, depth_sample: f32) -> vec3<f32> {
     // reconstruct world-space position from the screen coordinate.
