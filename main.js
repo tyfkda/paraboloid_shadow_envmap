@@ -1262,13 +1262,12 @@ const init = async ({ device, canvas, gui }) => {
     }
 
     const modelRotation = vec3.fromValues(0.0, 0.0, 0.0)
-    const startTime = Date.now() - 10000
-    let lastTime = 10.0
+    let lastTime = window.performance.now()
 
     function frame() {
         // Sample is no longer the active page.
 
-        const now = Date.now() - startTime
+        const now = window.performance.now()
         const t = now * (1 / 1000)
         const elapsedTime = (now - lastTime) * (1 / 1000)
         lastTime = now
