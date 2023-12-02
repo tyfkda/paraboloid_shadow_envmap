@@ -226,3 +226,127 @@ export function createTorus(radius, tube, radialSegments, tubularSegments) {
         colors,
     };
 }
+
+// From Three.js:
+// https://github.com/mrdoob/three.js/blob/09fe0527a9aa5aaca7aaf17531e6c0d0efaa8c59/src/geometries/TorusKnotGeometry.js
+export function createKnot(radius, tube, radialSegments, tubularSegments, p, q) {
+    function calculatePositionOnCurve( u, p, q, radius, position ) {
+
+        const cu = Math.cos( u );
+        const su = Math.sin( u );
+        const quOverP = q / p * u;
+        const cs = Math.cos( quOverP );
+
+        position[0] = radius * ( 2 + cs ) * 0.5 * cu;
+        position[1] = radius * ( 2 + cs ) * su * 0.5;
+        position[2] = radius * Math.sin( quOverP ) * 0.5;
+    }
+
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    const triangles = [];
+
+
+    const vertex = vec3.create();
+    const normal = vec3.create();
+
+    const P1 = vec3.create();
+    const P2 = vec3.create();
+
+    const B = vec3.create();
+    const T = vec3.create();
+    const N = vec3.create();
+
+    // generate vertices, normals and uvs
+
+    for ( let i = 0; i <= tubularSegments; ++ i ) {
+
+        // the radian "u" is used to calculate the position on the torus curve of the current tubular segment
+
+        const u = i / tubularSegments * p * Math.PI * 2;
+
+        // now we calculate two points. P1 is our current position on the curve, P2 is a little farther ahead.
+        // these points are used to create a special "coordinate space", which is necessary to calculate the correct vertex positions
+
+        calculatePositionOnCurve( u, p, q, radius, P1 );
+        calculatePositionOnCurve( u + 0.01, p, q, radius, P2 );
+
+        // calculate orthonormal basis
+
+        vec3.sub(P2, P1, T)
+        vec3.add(P2, P1, N)
+        vec3.cross(T, N, B)
+        vec3.cross(B, T, N)
+
+        // normalize B, N. T can be ignored, we don't use it
+
+        vec3.normalize(B, B)
+        vec3.normalize(N, N)
+
+        for ( let j = 0; j <= radialSegments; ++ j ) {
+
+            // now calculate the vertices. they are nothing more than an extrusion of the torus curve.
+            // because we extrude a shape in the xy-plane, there is no need to calculate a z-value.
+
+            const v = j / radialSegments * Math.PI * 2;
+            const cx = - tube * Math.cos( v );
+            const cy = tube * Math.sin( v );
+
+            // now calculate the final vertex position.
+            // first we orient the extrusion with our basis vectors, then we add it to the current position on the curve
+
+            vertex[0] = P1[0] + ( cx * N[0] + cy * B[0] );
+            vertex[1] = P1[1] + ( cx * N[1] + cy * B[1] );
+            vertex[2] = P1[2] + ( cx * N[2] + cy * B[2] );
+
+            positions.push( [vertex[0], vertex[1], vertex[2]] );
+
+            // normal (P1 is always the center/origin of the extrusion, thus we can use it to calculate the normal)
+
+            vec3.normalize( vec3.sub( vertex, P1, normal ), normal)
+
+            normals.push( [normal[0], normal[1], normal[2]] );
+
+            // uv
+
+            uvs.push( [q * i / tubularSegments, j / radialSegments] );
+
+        }
+
+    }
+
+    // generate indices
+
+    for ( let j = 1; j <= tubularSegments; j ++ ) {
+
+        for ( let i = 1; i <= radialSegments; i ++ ) {
+
+            // indices
+
+            const a = ( radialSegments + 1 ) * ( j - 1 ) + ( i - 1 );
+            const b = ( radialSegments + 1 ) * j + ( i - 1 );
+            const c = ( radialSegments + 1 ) * j + i;
+            const d = ( radialSegments + 1 ) * ( j - 1 ) + i;
+
+            // faces
+
+            triangles.push( [a, b, d] );
+            triangles.push( [b, c, d] );
+
+        }
+
+    }
+
+    const colors = []
+    for (let i = 0; i < positions.length; ++i)
+        colors.push([1.0, 1.0, 1.0])
+
+    return {
+        positions,
+        normals,
+        uvs,
+        triangles,
+        colors,
+    };
+}

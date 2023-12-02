@@ -2,7 +2,7 @@ import {mat4, vec3} from 'https://wgpu-matrix.org/dist/2.x/wgpu-matrix.module.js
 import * as dat from 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js'
 import {mesh as dragonMeshData} from './stanford-dragon.js'
 import {mesh as backgroundMeshData} from './background.js'
-import {createCube, createSphere, createTorus} from './utils.js'
+import {createCube, createSphere, createTorus, createKnot} from './utils.js'
 
 const kMaxNumLights = 32;
 const kMaxShadowPasses = kMaxNumLights * 2;  // 点光源用、双放物面で２倍必要
@@ -541,6 +541,7 @@ const init = async ({ device, canvas, gui }) => {
     const MODE_CUBE = 'Cube'
     const MODE_SPHERE = 'Sphere'
     const MODE_TORUS = 'Torus'
+    const MODE_KNOT = 'Knot'
     const MODE_GBUFFER = 'gBuffers view'
 
     const settings = {
@@ -551,7 +552,7 @@ const init = async ({ device, canvas, gui }) => {
     };
 
     gui
-        .add(settings, 'mode', [MODE_DRAGON, MODE_CUBE, MODE_SPHERE, MODE_TORUS, MODE_GBUFFER])
+        .add(settings, 'mode', [MODE_DRAGON, MODE_CUBE, MODE_SPHERE, MODE_TORUS, MODE_KNOT, MODE_GBUFFER])
         .onChange(() => {
             let mesh = meshes[settings.mode]
             if (mesh != null) {
@@ -586,11 +587,13 @@ const init = async ({ device, canvas, gui }) => {
     const cubeMesh = new Mesh(device, createCube(20.0, 16))
     const sphereMesh = new Mesh(device, createSphere(25.0, 64, 32))
     const torusMesh = new Mesh(device, createTorus(25.0, 8.0, 64, 32))
+    const knotMesh = new Mesh(device, createKnot(20.0, 3.0, 16, 128, 2, 3))
     const meshes = {
         [MODE_DRAGON]: dragonMesh,
         [MODE_CUBE]: cubeMesh,
         [MODE_SPHERE]: sphereMesh,
         [MODE_TORUS]: torusMesh,
+        [MODE_KNOT]: knotMesh,
     }
 
     // Create the model vertex buffer.
