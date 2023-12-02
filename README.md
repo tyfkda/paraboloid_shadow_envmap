@@ -7,6 +7,12 @@ Point Light Shadow & Envmap
 
 ![G-buffer, shadowmap &amp; envmap](gbuf.jpg)
 
+
+#### 動画
+
+[![点光源の全方位影＆動的環境マッピング on WebGPU](http://img.youtube.com/vi/NhdNzQr6sS4/0.jpg)](https://youtu.be/NhdNzQr6sS4)
+
+
 ### 参考
 
   * ベースにするリポジトリ：[Deferred Rendering & Shadow Mapping](https://github.com/tyfkda/deferred_shadow_mapping)
